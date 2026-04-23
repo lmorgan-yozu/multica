@@ -109,18 +109,21 @@ func runDocsList(cmd *cobra.Command, _ []string) error {
 	}
 	issueID, _ := cmd.Flags().GetString("issue")
 	projectID, _ := cmd.Flags().GetString("project")
-	if (issueID == "") == (projectID == "") {
-		return fmt.Errorf("exactly one of --issue or --project is required")
+	if issueID != "" && projectID != "" {
+		return fmt.Errorf("provide --issue or --project, not both (omit both for workspace-wide)")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	var path string
-	if issueID != "" {
+	switch {
+	case issueID != "":
 		path = "/api/issues/" + issueID + "/library"
-	} else {
+	case projectID != "":
 		path = "/api/projects/" + projectID + "/library"
+	default:
+		path = "/api/library"
 	}
 
 	var result map[string]any

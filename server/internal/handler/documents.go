@@ -244,6 +244,31 @@ WHERE a.workspace_id = $1 AND i.project_id = $2
 ORDER BY COALESCE(c.pinned, FALSE) DESC, COALESCE(c.sort_order, 0), a.created_at
 `
 
+// selectDocumentsForWorkspace aggregates every non-archived attachment
+// across every issue (and every comment) in the workspace. Used by the
+// workspace-scope library view in the sidebar.
+const selectDocumentsForWorkspace = `
+SELECT
+    a.id, a.issue_id, a.comment_id, a.filename, a.content_type,
+    a.size_bytes, a.url, a.created_at, a.uploader_type, a.uploader_id,
+    c.title, c.summary, c.category, c.tags,
+    c.sort_order, c.pinned, c.archived,
+    c.curator_type, c.curator_id, c.updated_at,
+    v.document_id, v.version_number,
+    COALESCE(i.id, ci.id) AS source_issue_id,
+    COALESCE(i.identifier, ci.identifier, '') AS source_issue_identifier,
+    COALESCE(i.title, ci.title, '') AS source_issue_title
+FROM attachment a
+LEFT JOIN issue i ON a.issue_id IS NOT NULL AND a.issue_id = i.id
+LEFT JOIN comment cm ON a.comment_id IS NOT NULL AND a.comment_id = cm.id
+LEFT JOIN issue ci ON cm.issue_id = ci.id
+LEFT JOIN document_curation c ON c.attachment_id = a.id
+LEFT JOIN document_version v ON v.attachment_id = a.id
+WHERE a.workspace_id = $1
+  AND COALESCE(c.archived, FALSE) = FALSE
+ORDER BY COALESCE(c.pinned, FALSE) DESC, COALESCE(c.sort_order, 0), a.created_at DESC
+`
+
 const selectSectionsForIssue = `
 SELECT s.id, s.name, s.description, s.sort_order, s.created_at, s.updated_at,
        COALESCE(array_agg(si.attachment_id ORDER BY si.position)
@@ -303,6 +328,66 @@ func (h *Handler) GetIssueLibrary(w http.ResponseWriter, r *http.Request) {
 		IssueID:   issueID,
 		Documents: docs,
 		Sections:  sections,
+	})
+}
+
+// GetWorkspaceLibrary returns every non-archived document across the whole
+// workspace, with source-issue metadata attached. Powers the sidebar-level
+// "Library" link that lets the team browse everything produced.
+//
+// Response shape matches ProjectLibrary so the UI can reuse the same shell
+// and source-issue meta formatter without branching on scope.
+func (h *Handler) GetWorkspaceLibrary(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
+	rows, err := h.DB.Query(r.Context(), selectDocumentsForWorkspace, parseUUID(workspaceID))
+	if err != nil {
+		slog.Warn("get workspace library failed", "error", err, "workspace_id", workspaceID)
+		writeError(w, http.StatusInternalServerError, "failed to list documents")
+		return
+	}
+	defer rows.Close()
+
+	docs := []ProjectLibraryDocument{}
+	for rows.Next() {
+		var row documentRow
+		var srcIssueID pgtype.UUID
+		var srcIdentifier, srcTitle string
+		if err := rows.Scan(
+			&row.AttachmentID, &row.IssueID, &row.CommentID, &row.Filename,
+			&row.ContentType, &row.SizeBytes, &row.URL, &row.CreatedAt,
+			&row.UploaderType, &row.UploaderID,
+			&row.Title, &row.Summary, &row.Category, &row.Tags,
+			&row.SortOrder, &row.Pinned, &row.Archived,
+			&row.CuratorType, &row.CuratorID, &row.CuratedAt,
+			&row.DocumentID, &row.VersionNumber,
+			&srcIssueID, &srcIdentifier, &srcTitle,
+		); err != nil {
+			slog.Warn("scan workspace library row failed", "error", err)
+			continue
+		}
+		doc := ProjectLibraryDocument{
+			Document: h.toDocument(row, true),
+		}
+		if srcIssueID.Valid {
+			doc.SourceIssueID = uuidToString(srcIssueID)
+			doc.SourceIssueIdentifier = srcIdentifier
+			doc.SourceIssueTitle = srcTitle
+		}
+		docs = append(docs, doc)
+	}
+
+	// Workspace-scope library has no explicit sections (those are per
+	// issue or per project). Return an empty array so the UI renders
+	// the category grouping uniformly.
+	writeJSON(w, http.StatusOK, ProjectLibraryResponse{
+		ProjectID: "",
+		Documents: docs,
+		Sections:  []LibrarySection{},
 	})
 }
 

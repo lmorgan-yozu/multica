@@ -1733,6 +1733,10 @@ export class ApiClient {
     return this.fetch(`/api/projects/${projectId}/library`);
   }
 
+  async getWorkspaceLibrary(): Promise<ProjectLibrary> {
+    return this.fetch(`/api/library`);
+  }
+
   async updateDocumentCuration(
     attachmentId: string,
     payload: DocumentCurationPayload,
@@ -1832,6 +1836,10 @@ export class ApiClient {
 
   exportSectionUrl(sectionId: string): string {
     return `/api/library/sections/${sectionId}/export.zip`;
+  }
+
+  exportWorkspaceLibraryUrl(): string {
+    return `/api/library/export.zip`;
   }
 
   // Projects

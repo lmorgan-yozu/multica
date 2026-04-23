@@ -790,6 +790,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Document library (feature/document-viewer)
 			// Curation-layer endpoints that turn issue/project attachments
 			// into a browsable, agent-organisable document library.
+			r.Get("/api/library", h.GetWorkspaceLibrary)
+			r.Get("/api/library/export.zip", h.ExportWorkspaceLibrary)
 			r.Get("/api/issues/{id}/library", h.GetIssueLibrary)
 			r.Get("/api/projects/{id}/library", h.GetProjectLibrary)
 			r.Get("/api/issues/{id}/library/export.zip", h.ExportIssueLibrary)

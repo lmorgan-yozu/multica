@@ -73,6 +73,11 @@ export type {
   ProjectLibrary,
   DocumentCurationPayload,
   CreateLibrarySectionPayload,
+  DocumentVersion,
+  DocumentVersionsResponse,
+  DocumentComment,
+  DocumentCommentsResponse,
+  UnsummarisedDocumentsResponse,
 } from "./documents";
 export type { ChatSession, ChatMessage, ChatMessagesPage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
 export type { StorageAdapter } from "./storage";

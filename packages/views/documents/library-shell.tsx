@@ -20,6 +20,10 @@ export interface LibraryShellProps<D extends Document> {
   /** Render a doc when the user selects it. Defaults to DocumentViewer. */
   renderViewer?: (doc: D) => React.ReactNode;
   emptyState?: React.ReactNode;
+  /** URL for the "Download all" button. Omit to hide the button. */
+  exportUrl?: string;
+  /** Filename for the downloaded zip. */
+  exportFilename?: string;
 }
 
 export function LibraryShell<D extends Document>({
@@ -30,6 +34,8 @@ export function LibraryShell<D extends Document>({
   renderDocMeta,
   renderViewer,
   emptyState,
+  exportUrl,
+  exportFilename,
 }: LibraryShellProps<D>): React.JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(
     documents[0]?.attachment_id ?? null,
@@ -83,9 +89,21 @@ export function LibraryShell<D extends Document>({
   return (
     <div className="flex h-full min-h-[60vh] flex-col gap-4 lg:flex-row">
       <aside className="flex shrink-0 flex-col gap-3 lg:w-80 lg:border-r lg:border-border lg:pr-4">
-        <header>
-          <h1 className="text-lg font-semibold">{title}</h1>
-          {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+        <header className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold">{title}</h1>
+            {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+          </div>
+          {exportUrl && (
+            <a
+              href={exportUrl}
+              download={exportFilename ?? true}
+              className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title="Download all documents as a zip"
+            >
+              Download all
+            </a>
+          )}
         </header>
         <input
           type="search"

@@ -48,6 +48,12 @@ type Document struct {
 	CuratorType *string `json:"curator_type,omitempty"`
 	CuratorID   *string `json:"curator_id,omitempty"`
 	CuratedAt   *string `json:"curated_at,omitempty"`
+
+	// Version identity (populated when the attachment belongs to a
+	// document_version record; null for legacy attachments until they're
+	// first accessed through a versioning-aware path).
+	DocumentID    *string `json:"document_id,omitempty"`
+	VersionNumber *int    `json:"version_number,omitempty"`
 }
 
 type LibrarySection struct {
@@ -107,6 +113,9 @@ type documentRow struct {
 	CuratorType pgtype.Text
 	CuratorID   pgtype.UUID
 	CuratedAt   pgtype.Timestamptz
+
+	DocumentID    pgtype.UUID
+	VersionNumber pgtype.Int4
 }
 
 func (h *Handler) toDocument(row documentRow, cfSignerAvailable bool) Document {
@@ -175,6 +184,14 @@ func (h *Handler) toDocument(row documentRow, cfSignerAvailable bool) Document {
 		ts := timestampToString(row.CuratedAt)
 		doc.CuratedAt = &ts
 	}
+	if row.DocumentID.Valid {
+		did := uuidToString(row.DocumentID)
+		doc.DocumentID = &did
+	}
+	if row.VersionNumber.Valid {
+		v := int(row.VersionNumber.Int32)
+		doc.VersionNumber = &v
+	}
 
 	return doc
 }
@@ -189,9 +206,11 @@ SELECT
     a.size_bytes, a.url, a.created_at, a.uploader_type, a.uploader_id,
     c.title, c.summary, c.category, c.tags,
     c.sort_order, c.pinned, c.archived,
-    c.curator_type, c.curator_id, c.updated_at
+    c.curator_type, c.curator_id, c.updated_at,
+    v.document_id, v.version_number
 FROM attachment a
 LEFT JOIN document_curation c ON c.attachment_id = a.id
+LEFT JOIN document_version v ON v.attachment_id = a.id
 WHERE a.workspace_id = $1
   AND (a.issue_id = $2 OR a.comment_id IN (
         SELECT id FROM comment WHERE issue_id = $2
@@ -209,6 +228,7 @@ SELECT
     c.title, c.summary, c.category, c.tags,
     c.sort_order, c.pinned, c.archived,
     c.curator_type, c.curator_id, c.updated_at,
+    v.document_id, v.version_number,
     i.id AS source_issue_id, i.identifier, i.title
 FROM attachment a
 JOIN issue i ON (
@@ -218,6 +238,7 @@ JOIN issue i ON (
     ))
 )
 LEFT JOIN document_curation c ON c.attachment_id = a.id
+LEFT JOIN document_version v ON v.attachment_id = a.id
 WHERE a.workspace_id = $1 AND i.project_id = $2
   AND COALESCE(c.archived, FALSE) = FALSE
 ORDER BY COALESCE(c.pinned, FALSE) DESC, COALESCE(c.sort_order, 0), a.created_at
@@ -320,6 +341,7 @@ func (h *Handler) GetProjectLibrary(w http.ResponseWriter, r *http.Request) {
 			&row.Title, &row.Summary, &row.Category, &row.Tags,
 			&row.SortOrder, &row.Pinned, &row.Archived,
 			&row.CuratorType, &row.CuratorID, &row.CuratedAt,
+			&row.DocumentID, &row.VersionNumber,
 			&srcIssueID, &srcIdentifier, &srcTitle,
 		); err != nil {
 			slog.Warn("scan project library row failed", "error", err)
@@ -672,6 +694,7 @@ func (h *Handler) queryDocuments(r *http.Request, sqlQuery string, args ...any) 
 			&row.Title, &row.Summary, &row.Category, &row.Tags,
 			&row.SortOrder, &row.Pinned, &row.Archived,
 			&row.CuratorType, &row.CuratorID, &row.CuratedAt,
+			&row.DocumentID, &row.VersionNumber,
 		); err != nil {
 			return nil, err
 		}

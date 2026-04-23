@@ -1842,6 +1842,26 @@ export class ApiClient {
     return `/api/library/export.zip`;
   }
 
+  // Authenticated binary fetch. Used by "Download all" where an <a href>
+  // click would skip the X-Workspace-Slug header and hit the
+  // workspace-required middleware with a 400. This mirrors fetch() above
+  // but returns a Blob instead of decoding as JSON.
+  async downloadBlob(path: string): Promise<Blob> {
+    const headers: Record<string, string> = {
+      "X-Request-ID": createRequestId(),
+      ...this.authHeaders(),
+    };
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      headers,
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const msg = await this.parseErrorMessage(res, `download ${path} returned ${res.status}`);
+      throw new ApiError(msg, res.status, res.statusText);
+    }
+    return res.blob();
+  }
+
   // Projects
   async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();

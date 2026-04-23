@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, Library, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
+import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
@@ -26,6 +26,7 @@ import { filterIssues } from "../../issues/utils/filter";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, useNavigation } from "../../navigation";
+import { LibraryTabLink } from "../../documents";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { IssuesHeader } from "../../issues/components/issues-header";
@@ -510,14 +511,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               <span className="truncate">{project.title}</span>
             </div>
             <div className="flex items-center gap-1 shrink-0">
-              <AppLink
+              <LibraryTabLink
                 href={wsPaths.projectLibrary(projectId)}
-                title="Open document library"
-                aria-label="Open document library"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              >
-                <Library className="h-3.5 w-3.5" />
-              </AppLink>
+                scope="project"
+                scopeId={projectId}
+                className="mr-1"
+              />
               <Button
                 variant="ghost"
                 size="icon-sm"

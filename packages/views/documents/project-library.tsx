@@ -58,6 +58,8 @@ export function ProjectLibrary({ projectId, title, subtitle }: ProjectLibraryPro
       subtitle={subtitle}
       documents={data.documents}
       sections={data.sections}
+      exportUrl={api.exportProjectLibraryUrl(projectId)}
+      exportFilename={`project-${projectId}-library.zip`}
       renderDocMeta={(doc) => (
         <span>
           {doc.source_issue_identifier} · {doc.source_issue_title}

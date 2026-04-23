@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
+import { LibraryTabLink } from "../../documents";
 import {
   ArrowDown,
   ArrowUp,
@@ -11,7 +12,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Library,
   Link2,
   MoreHorizontal,
   PanelRight,
@@ -706,22 +706,12 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <AppLink
-                    href={paths.issueLibrary(issue.id)}
-                    className={cn(
-                      "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground",
-                    )}
-                    aria-label="Open library"
-                  >
-                    <Library className="h-3.5 w-3.5" />
-                  </AppLink>
-                }
-              />
-              <TooltipContent>Open document library</TooltipContent>
-            </Tooltip>
+            <LibraryTabLink
+              href={paths.issueLibrary(issue.id)}
+              scope="issue"
+              scopeId={issue.id}
+              className="mr-1"
+            />
             <Tooltip>
               <TooltipTrigger
                 render={

@@ -7,13 +7,24 @@
 
 import * as React from "react";
 import { useEffect, useState } from "react";
+import { api } from "@multica/core/api";
 import type { Document } from "@multica/core/types";
 import { Markdown } from "../common/markdown";
+import { DocumentComments } from "./document-comments";
+import { DocumentVersions } from "./document-versions";
 
 interface DocumentViewerProps {
   document: Document;
   /** Optional class applied to the outer wrapper. */
   className?: string;
+  /** Current user id, for own-comment affordances. */
+  currentUserId?: string;
+  /** Show the version history block. Defaults to true. */
+  showVersions?: boolean;
+  /** Show the comments block. Defaults to true. */
+  showComments?: boolean;
+  /** Show a Summarise action when summary is empty. Defaults to true. */
+  showSummariseAction?: boolean;
 }
 
 const TEXT_TYPES = [
@@ -43,12 +54,49 @@ function isMarkdown(contentType: string, filename: string): boolean {
   return false;
 }
 
-export function DocumentViewer({ document, className }: DocumentViewerProps): React.JSX.Element {
+export function DocumentViewer({
+  document,
+  className,
+  currentUserId,
+  showVersions = true,
+  showComments = true,
+  showSummariseAction = true,
+}: DocumentViewerProps): React.JSX.Element {
   const [textContent, setTextContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [summarising, setSummarising] = useState(false);
+  const [summariseError, setSummariseError] = useState<string | null>(null);
+  const [localSummary, setLocalSummary] = useState<string | null>(null);
 
   const isText = isTextish(document.content_type, document.filename);
+  const displaySummary = localSummary ?? document.summary ?? null;
+
+  const onGenerateSummary = async () => {
+    if (!textContent) return;
+    setSummarising(true);
+    setSummariseError(null);
+    try {
+      // Heuristic summary: first non-empty heading or the first 280 chars of
+      // the first paragraph. Deliberately mechanical — real LLM-backed
+      // summaries come from the auto-summarise autopilot, see docs_v2.go
+      // `ListUnsummarisedDocuments`. This button exists so humans can
+      // seed a summary on the spot without waiting for the autopilot.
+      const lines = textContent.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      const firstHeading = lines.find((l) => /^#{1,3}\s+/.test(l));
+      const firstPara = lines.find((l) => !/^#{1,3}\s+/.test(l)) ?? "";
+      const heuristic = firstHeading
+        ? firstHeading.replace(/^#{1,3}\s+/, "")
+        : firstPara.slice(0, 280);
+      if (!heuristic) throw new Error("No content available to summarise");
+      await api.updateDocumentCuration(document.attachment_id, { summary: heuristic });
+      setLocalSummary(heuristic);
+    } catch (e) {
+      setSummariseError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSummarising(false);
+    }
+  };
 
   useEffect(() => {
     if (!isText) {
@@ -84,16 +132,48 @@ export function DocumentViewer({ document, className }: DocumentViewerProps): Re
   return (
     <article className={className}>
       <header className="mb-4 border-b border-border pb-3">
-        <h1 className="text-xl font-semibold">{title}</h1>
-        {document.summary && (
-          <p className="mt-1 text-sm text-muted-foreground">{document.summary}</p>
-        )}
+        <h1 className="text-xl font-semibold">
+          {title}
+          {document.version_number && document.version_number > 1 && (
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              v{document.version_number}
+            </span>
+          )}
+        </h1>
+        {displaySummary ? (
+          <p className="mt-1 text-sm text-muted-foreground">{displaySummary}</p>
+        ) : showSummariseAction && isText ? (
+          <div className="mt-1 flex items-center gap-2 text-xs">
+            <span className="text-muted-foreground">No summary yet.</span>
+            <button
+              type="button"
+              className="rounded-md border border-border px-2 py-0.5 text-xs hover:bg-muted disabled:opacity-50"
+              onClick={onGenerateSummary}
+              disabled={summarising || textContent === null}
+            >
+              {summarising ? "Summarising…" : "Generate summary"}
+            </button>
+            {summariseError && <span className="text-destructive">{summariseError}</span>}
+          </div>
+        ) : null}
         <DocumentMetaRow document={document} />
       </header>
 
       <div className="prose prose-sm max-w-none dark:prose-invert">
         {renderContent({ document, textContent, loading, error, isText })}
       </div>
+
+      {showVersions && (
+        <DocumentVersions attachmentId={document.attachment_id} className="mt-6" />
+      )}
+
+      {showComments && (
+        <DocumentComments
+          attachmentId={document.attachment_id}
+          currentUserId={currentUserId}
+          className="mt-6 border-t border-border pt-4"
+        />
+      )}
     </article>
   );
 }

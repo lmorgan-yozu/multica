@@ -332,12 +332,21 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 			// into a browsable, agent-organisable document library.
 			r.Get("/api/issues/{id}/library", h.GetIssueLibrary)
 			r.Get("/api/projects/{id}/library", h.GetProjectLibrary)
+			r.Get("/api/issues/{id}/library/export.zip", h.ExportIssueLibrary)
+			r.Get("/api/projects/{id}/library/export.zip", h.ExportProjectLibrary)
 			r.Get("/api/documents/{id}/content", h.GetDocumentContent)
 			r.Put("/api/documents/{id}/curation", h.UpsertDocumentCuration)
+			r.Get("/api/documents/{id}/versions", h.GetDocumentVersions)
+			r.Post("/api/documents/{id}/versions", h.CreateDocumentVersion)
+			r.Get("/api/documents/{id}/comments", h.ListDocumentComments)
+			r.Post("/api/documents/{id}/comments", h.CreateDocumentComment)
+			r.Delete("/api/documents/comments/{commentId}", h.DeleteDocumentComment)
+			r.Get("/api/documents/unsummarised", h.ListUnsummarisedDocuments)
 			r.Route("/api/library/sections", func(r chi.Router) {
 				r.Post("/", h.CreateLibrarySection)
 				r.Post("/{id}/items", h.AddSectionItem)
 				r.Delete("/{id}/items/{attachmentId}", h.RemoveSectionItem)
+				r.Get("/{id}/export.zip", h.ExportLibrarySection)
 			})
 
 			// Comments

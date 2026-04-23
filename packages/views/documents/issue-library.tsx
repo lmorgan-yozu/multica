@@ -58,6 +58,8 @@ export function IssueLibrary({ issueId, title, subtitle }: IssueLibraryProps): R
       subtitle={subtitle}
       documents={data.documents}
       sections={data.sections}
+      exportUrl={api.exportIssueLibraryUrl(issueId)}
+      exportFilename={`issue-${issueId}-library.zip`}
     />
   );
 }

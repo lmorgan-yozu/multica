@@ -47,6 +47,11 @@ import type {
   LibrarySection,
   DocumentCurationPayload,
   CreateLibrarySectionPayload,
+  DocumentVersion,
+  DocumentVersionsResponse,
+  DocumentComment,
+  DocumentCommentsResponse,
+  UnsummarisedDocumentsResponse,
   ChatSession,
   ChatMessage,
   ChatPendingTask,
@@ -1001,6 +1006,67 @@ export class ApiClient {
       `/api/library/sections/${sectionId}/items/${attachmentId}`,
       { method: "DELETE" },
     );
+  }
+
+  // Document versioning (Phase 1b)
+  async listDocumentVersions(attachmentId: string): Promise<DocumentVersionsResponse> {
+    return this.fetch(`/api/documents/${attachmentId}/versions`);
+  }
+
+  async createDocumentVersion(
+    existingAttachmentId: string,
+    newAttachmentId: string,
+    notes?: string,
+  ): Promise<DocumentVersion> {
+    return this.fetch(`/api/documents/${existingAttachmentId}/versions`, {
+      method: "POST",
+      body: JSON.stringify({ attachment_id: newAttachmentId, notes }),
+    });
+  }
+
+  // Document comments
+  async listDocumentComments(attachmentId: string): Promise<DocumentCommentsResponse> {
+    return this.fetch(`/api/documents/${attachmentId}/comments`);
+  }
+
+  async createDocumentComment(
+    attachmentId: string,
+    content: string,
+    parentId?: string,
+  ): Promise<DocumentComment> {
+    return this.fetch(`/api/documents/${attachmentId}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ content, parent_id: parentId }),
+    });
+  }
+
+  async deleteDocumentComment(commentId: string): Promise<void> {
+    await this.fetch(`/api/documents/comments/${commentId}`, { method: "DELETE" });
+  }
+
+  // Summarisation targeting
+  async listUnsummarisedDocuments(params?: {
+    issueId?: string;
+    projectId?: string;
+  }): Promise<UnsummarisedDocumentsResponse> {
+    const qs = new URLSearchParams();
+    if (params?.issueId) qs.set("issue_id", params.issueId);
+    if (params?.projectId) qs.set("project_id", params.projectId);
+    const q = qs.toString();
+    return this.fetch(`/api/documents/unsummarised${q ? `?${q}` : ""}`);
+  }
+
+  // Bulk export paths (used for <a href="..." download> in the UI)
+  exportIssueLibraryUrl(issueId: string): string {
+    return `/api/issues/${issueId}/library/export.zip`;
+  }
+
+  exportProjectLibraryUrl(projectId: string): string {
+    return `/api/projects/${projectId}/library/export.zip`;
+  }
+
+  exportSectionUrl(sectionId: string): string {
+    return `/api/library/sections/${sectionId}/export.zip`;
   }
 
   // Projects

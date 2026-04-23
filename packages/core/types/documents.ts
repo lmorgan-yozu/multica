@@ -29,6 +29,56 @@ export interface Document {
   curator_type?: "member" | "agent";
   curator_id?: string;
   curated_at?: string;
+
+  // Document-version identity. Populated once the attachment has been
+  // touched through a versioning-aware endpoint; null for older data.
+  document_id?: string;
+  version_number?: number;
+}
+
+export interface DocumentVersion {
+  id: string;
+  document_id: string;
+  attachment_id: string;
+  version_number: number;
+  notes?: string;
+  author_type: "member" | "agent";
+  author_id: string;
+  created_at: string;
+  filename: string;
+  size_bytes: number;
+  content_type: string;
+}
+
+export interface DocumentVersionsResponse {
+  document_id: string;
+  versions: DocumentVersion[];
+}
+
+export interface DocumentComment {
+  id: string;
+  document_id: string;
+  parent_id?: string;
+  content: string;
+  author_type: "member" | "agent";
+  author_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentCommentsResponse {
+  document_id: string;
+  comments: DocumentComment[];
+}
+
+export interface UnsummarisedDocumentsResponse {
+  documents: Array<{
+    attachment_id: string;
+    filename: string;
+    content_type: string;
+    size_bytes: number;
+    created_at: string;
+  }>;
 }
 
 export interface ProjectLibraryDocument extends Document {

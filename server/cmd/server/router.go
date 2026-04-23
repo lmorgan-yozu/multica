@@ -787,6 +787,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/attachments/{id}/content", h.GetAttachmentContent)
 			r.Delete("/api/attachments/{id}", h.DeleteAttachment)
 
+			// Document library (feature/document-viewer)
+			// Curation-layer endpoints that turn issue/project attachments
+			// into a browsable, agent-organisable document library.
+			r.Get("/api/issues/{id}/library", h.GetIssueLibrary)
+			r.Get("/api/projects/{id}/library", h.GetProjectLibrary)
+			r.Get("/api/documents/{id}/content", h.GetDocumentContent)
+			r.Put("/api/documents/{id}/curation", h.UpsertDocumentCuration)
+			r.Route("/api/library/sections", func(r chi.Router) {
+				r.Post("/", h.CreateLibrarySection)
+				r.Post("/{id}/items", h.AddSectionItem)
+				r.Delete("/{id}/items/{attachmentId}", h.RemoveSectionItem)
+			})
+
 			// Comments
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
 				r.Put("/", h.UpdateComment)

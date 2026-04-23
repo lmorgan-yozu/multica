@@ -7,8 +7,53 @@
 
 import * as React from "react";
 import { useMemo, useState } from "react";
+import { api } from "@multica/core/api";
 import type { Document, LibrarySection } from "@multica/core/types";
 import { DocumentViewer } from "./document-viewer";
+
+// DownloadAllButton does an authed GET of the export URL via the API
+// client (which sends X-Workspace-Slug and credentials), then blobs the
+// response and triggers a client-side download. A raw `<a href>` would
+// skip those headers and hit the workspace-required middleware with a 400.
+function DownloadAllButton({ url, filename }: { url: string; filename?: string }): React.JSX.Element {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onClick = async () => {
+    setPending(true);
+    setError(null);
+    try {
+      const blob = await api.downloadBlob(url);
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = filename ?? "library.zip";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(href);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="flex shrink-0 flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={pending}
+        className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+        title="Download all documents as a zip"
+      >
+        {pending ? "Preparing…" : "Download all"}
+      </button>
+      {error && <span className="text-[11px] text-destructive">{error}</span>}
+    </div>
+  );
+}
 
 export interface LibraryShellProps<D extends Document> {
   title: string;
@@ -94,16 +139,7 @@ export function LibraryShell<D extends Document>({
             <h1 className="text-lg font-semibold">{title}</h1>
             {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
           </div>
-          {exportUrl && (
-            <a
-              href={exportUrl}
-              download={exportFilename ?? true}
-              className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              title="Download all documents as a zip"
-            >
-              Download all
-            </a>
-          )}
+          {exportUrl && <DownloadAllButton url={exportUrl} filename={exportFilename} />}
         </header>
         <input
           type="search"

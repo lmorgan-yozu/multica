@@ -225,7 +225,9 @@ function renderContent(args: {
     if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>;
     if (textContent === null) return null;
     if (isMarkdown(document.content_type, document.filename)) {
-      return <Markdown>{textContent}</Markdown>;
+      // 'full' mode renders proper headings, tables, blockquotes, and
+      // code blocks; the 'minimal' default is tuned for chat messages.
+      return <Markdown mode="full">{textContent}</Markdown>;
     }
     return (
       <pre className="overflow-x-auto rounded-md border border-border bg-muted p-3 text-xs">

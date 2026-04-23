@@ -638,6 +638,24 @@ LIMIT 100
 // Bulk export
 // ---------------------------------------------------------------------------
 
+// ExportWorkspaceLibrary streams a zip of every non-archived document in
+// the workspace. Intended for backup / offline review rather than everyday
+// use; for routine use the per-project or per-issue exports are friendlier.
+func (h *Handler) ExportWorkspaceLibrary(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	h.streamLibraryZip(w, r, "workspace-library.zip",
+		`SELECT a.id, a.filename, a.url, a.content_type
+         FROM attachment a
+         LEFT JOIN document_curation c ON c.attachment_id = a.id
+         WHERE a.workspace_id = $1
+           AND COALESCE(c.archived, FALSE) = FALSE`,
+		parseUUID(workspaceID))
+}
+
 // ExportIssueLibrary streams a zip of every (non-archived) document on an
 // issue. Filenames inside the zip are deduplicated by suffixing a counter
 // on collision.

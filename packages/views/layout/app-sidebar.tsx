@@ -29,6 +29,7 @@ import {
   SquarePen,
   CircleUser,
   FolderKanban,
+  Library,
   MessageSquare,
   Loader2,
   X,
@@ -99,6 +100,7 @@ type NavKey =
   | "myIssues"
   | "issues"
   | "projects"
+  | "library"
   | "autopilots"
   | "agents"
   | "runtimes"
@@ -114,6 +116,7 @@ const personalNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
 const workspaceNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
   { key: "issues", label: "Issues", icon: ListTodo },
   { key: "projects", label: "Projects", icon: FolderKanban },
+  { key: "library", label: "Library", icon: Library },
   { key: "autopilots", label: "Autopilot", icon: Zap },
   { key: "agents", label: "Agents", icon: Bot },
 ];

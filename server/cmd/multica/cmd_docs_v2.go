@@ -132,6 +132,7 @@ func init() {
 	docsExportCmd.Flags().String("issue", "", "Issue ID to export")
 	docsExportCmd.Flags().String("project", "", "Project ID to export")
 	docsExportCmd.Flags().String("section", "", "Section ID to export")
+	docsExportCmd.Flags().Bool("workspace", false, "Export the whole workspace library")
 	docsExportCmd.Flags().StringP("output", "o", "", "Output path (defaults to <scope>-library.zip)")
 }
 
@@ -352,6 +353,7 @@ func runDocsExport(cmd *cobra.Command, _ []string) error {
 	issueID, _ := cmd.Flags().GetString("issue")
 	projectID, _ := cmd.Flags().GetString("project")
 	sectionID, _ := cmd.Flags().GetString("section")
+	workspace, _ := cmd.Flags().GetBool("workspace")
 	outputPath, _ := cmd.Flags().GetString("output")
 
 	set := 0
@@ -371,8 +373,13 @@ func runDocsExport(cmd *cobra.Command, _ []string) error {
 		urlPath = "/api/library/sections/" + sectionID + "/export.zip"
 		defaultName = "section-" + sectionID + ".zip"
 	}
+	if workspace {
+		set++
+		urlPath = "/api/library/export.zip"
+		defaultName = "workspace-library.zip"
+	}
 	if set != 1 {
-		return fmt.Errorf("exactly one of --issue, --project, or --section is required")
+		return fmt.Errorf("exactly one of --issue, --project, --section, or --workspace is required")
 	}
 	if outputPath == "" {
 		outputPath = defaultName

@@ -39,6 +39,15 @@ export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";
 export type * from "./api";
 export type { Attachment } from "./attachment";
+export type {
+  Document,
+  ProjectLibraryDocument,
+  LibrarySection,
+  IssueLibrary,
+  ProjectLibrary,
+  DocumentCurationPayload,
+  CreateLibrarySectionPayload,
+} from "./documents";
 export type { ChatSession, ChatMessage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
 export type { StorageAdapter } from "./storage";
 export type { Project, ProjectStatus, ProjectPriority, CreateProjectRequest, UpdateProjectRequest, ListProjectsResponse } from "./project";

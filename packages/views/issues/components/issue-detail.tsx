@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Library,
   Link2,
   MoreHorizontal,
   PanelRight,
@@ -705,6 +706,22 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             </span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <AppLink
+                    href={paths.issueLibrary(issue.id)}
+                    className={cn(
+                      "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground",
+                    )}
+                    aria-label="Open library"
+                  >
+                    <Library className="h-3.5 w-3.5" />
+                  </AppLink>
+                }
+              />
+              <TooltipContent>Open document library</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger
                 render={

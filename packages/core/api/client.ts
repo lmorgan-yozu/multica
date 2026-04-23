@@ -42,6 +42,11 @@ import type {
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
+  IssueLibrary,
+  ProjectLibrary,
+  LibrarySection,
+  DocumentCurationPayload,
+  CreateLibrarySectionPayload,
   ChatSession,
   ChatMessage,
   ChatPendingTask,
@@ -947,6 +952,55 @@ export class ApiClient {
 
   async deleteAttachment(id: string): Promise<void> {
     await this.fetch(`/api/attachments/${id}`, { method: "DELETE" });
+  }
+
+  // Document library (feature/document-viewer)
+  async getIssueLibrary(issueId: string): Promise<IssueLibrary> {
+    return this.fetch(`/api/issues/${issueId}/library`);
+  }
+
+  async getProjectLibrary(projectId: string): Promise<ProjectLibrary> {
+    return this.fetch(`/api/projects/${projectId}/library`);
+  }
+
+  async updateDocumentCuration(
+    attachmentId: string,
+    payload: DocumentCurationPayload,
+  ): Promise<{ ok: true }> {
+    return this.fetch(`/api/documents/${attachmentId}/curation`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async createLibrarySection(
+    payload: CreateLibrarySectionPayload,
+  ): Promise<LibrarySection> {
+    return this.fetch(`/api/library/sections`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async addLibrarySectionItem(
+    sectionId: string,
+    attachmentId: string,
+    position?: number,
+  ): Promise<{ ok: true }> {
+    return this.fetch(`/api/library/sections/${sectionId}/items`, {
+      method: "POST",
+      body: JSON.stringify({ attachment_id: attachmentId, position: position ?? 0 }),
+    });
+  }
+
+  async removeLibrarySectionItem(
+    sectionId: string,
+    attachmentId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/library/sections/${sectionId}/items/${attachmentId}`,
+      { method: "DELETE" },
+    );
   }
 
   // Projects

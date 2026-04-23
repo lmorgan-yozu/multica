@@ -519,6 +519,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
 
+		// Document content is served outside the workspace-required
+		// group because it's hit by <iframe>, <img>, and bare fetch()
+		// from the document viewer, none of which can set
+		// X-Workspace-Slug. GetDocumentContent resolves the workspace
+		// from the attachment record and verifies the caller is a
+		// member of that workspace before streaming.
+		r.Get("/api/documents/{id}/content", h.GetDocumentContent)
+
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
 			r.Post("/", h.CreateWorkspace)
@@ -796,7 +804,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/projects/{id}/library", h.GetProjectLibrary)
 			r.Get("/api/issues/{id}/library/export.zip", h.ExportIssueLibrary)
 			r.Get("/api/projects/{id}/library/export.zip", h.ExportProjectLibrary)
-			r.Get("/api/documents/{id}/content", h.GetDocumentContent)
 			r.Put("/api/documents/{id}/curation", h.UpsertDocumentCuration)
 			r.Get("/api/documents/{id}/versions", h.GetDocumentVersions)
 			r.Post("/api/documents/{id}/versions", h.CreateDocumentVersion)

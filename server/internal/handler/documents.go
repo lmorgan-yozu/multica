@@ -468,6 +468,12 @@ func (h *Handler) GetProjectLibrary(w http.ResponseWriter, r *http.Request) {
 // API so the web UI can render markdown/text/PDF/image attachments inline
 // without having to deal with relative upload paths or CORS on local
 // storage deployments.
+//
+// Because this URL is embedded in <iframe> / <img> and bare fetch() calls
+// from the viewer, we can't rely on X-Workspace-Slug being set by the
+// caller. Instead we resolve the workspace from the attachment record and
+// authorise based on the user's membership of that workspace. Session
+// cookies still carry the user identity, so auth isn't relaxed.
 func (h *Handler) GetDocumentContent(w http.ResponseWriter, r *http.Request) {
 	attachmentID := chi.URLParam(r, "id")
 	if attachmentID == "" {
@@ -475,17 +481,20 @@ func (h *Handler) GetDocumentContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaceID := h.resolveWorkspaceID(r)
-	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspace_id is required")
+	userID, ok := requireUserID(w, r)
+	if !ok {
 		return
 	}
 
-	att, err := h.Queries.GetAttachment(r.Context(), db.GetAttachmentParams{
-		ID:          parseUUID(attachmentID),
-		WorkspaceID: parseUUID(workspaceID),
-	})
-	if err != nil {
+	// Look up the attachment by id alone. We intentionally don't use
+	// sqlc's GetAttachment (which takes workspace_id) because the caller
+	// may not know which workspace this attachment belongs to.
+	const selectSQL = `SELECT workspace_id, url FROM attachment WHERE id = $1`
+	var (
+		workspaceUUID pgtype.UUID
+		attURL        string
+	)
+	if err := h.DB.QueryRow(r.Context(), selectSQL, parseUUID(attachmentID)).Scan(&workspaceUUID, &attURL); err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "attachment not found")
 			return
@@ -495,18 +504,25 @@ func (h *Handler) GetDocumentContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify the user is a member of this attachment's workspace.
+	workspaceID := uuidToString(workspaceUUID)
+	if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
+		writeError(w, http.StatusForbidden, "not a member of this workspace")
+		return
+	}
+
 	if local, ok := h.Storage.(localServeFiler); ok {
 		// Local storage: strip the /uploads/ prefix and serve via the existing
 		// ServeFile helper on the storage layer.
-		path := strings.TrimPrefix(att.Url, "/uploads/")
+		path := strings.TrimPrefix(attURL, "/uploads/")
 		local.ServeFile(w, r, path)
 		return
 	}
 
 	// Remote/signed storage: redirect to a signed URL good for a short window.
-	target := att.Url
+	target := attURL
 	if h.CFSigner != nil {
-		target = h.CFSigner.SignedURL(att.Url, time.Now().Add(15*time.Minute))
+		target = h.CFSigner.SignedURL(attURL, time.Now().Add(15*time.Minute))
 	}
 	http.Redirect(w, r, target, http.StatusTemporaryRedirect)
 }

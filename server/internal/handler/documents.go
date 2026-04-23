@@ -221,6 +221,8 @@ ORDER BY COALESCE(c.pinned, FALSE) DESC, COALESCE(c.sort_order, 0), a.created_at
 
 // selectDocumentsForProject fans out to every issue in the project and
 // attaches the source-issue summary to each document for the library UI.
+// The issue identifier is computed from workspace.issue_prefix + issue.number,
+// matching what issue.go does in response serialisation.
 const selectDocumentsForProject = `
 SELECT
     a.id, a.issue_id, a.comment_id, a.filename, a.content_type,
@@ -229,7 +231,9 @@ SELECT
     c.sort_order, c.pinned, c.archived,
     c.curator_type, c.curator_id, c.updated_at,
     v.document_id, v.version_number,
-    i.id AS source_issue_id, i.identifier, i.title
+    i.id AS source_issue_id,
+    w.issue_prefix || '-' || i.number AS source_issue_identifier,
+    i.title AS source_issue_title
 FROM attachment a
 JOIN issue i ON (
     (a.issue_id IS NOT NULL AND a.issue_id = i.id)
@@ -237,6 +241,7 @@ JOIN issue i ON (
          SELECT cc.id FROM comment cc WHERE cc.issue_id = i.id
     ))
 )
+JOIN workspace w ON w.id = a.workspace_id
 LEFT JOIN document_curation c ON c.attachment_id = a.id
 LEFT JOIN document_version v ON v.attachment_id = a.id
 WHERE a.workspace_id = $1 AND i.project_id = $2
@@ -247,6 +252,7 @@ ORDER BY COALESCE(c.pinned, FALSE) DESC, COALESCE(c.sort_order, 0), a.created_at
 // selectDocumentsForWorkspace aggregates every non-archived attachment
 // across every issue (and every comment) in the workspace. Used by the
 // workspace-scope library view in the sidebar.
+// identifier is computed from workspace.issue_prefix + issue.number.
 const selectDocumentsForWorkspace = `
 SELECT
     a.id, a.issue_id, a.comment_id, a.filename, a.content_type,
@@ -256,9 +262,10 @@ SELECT
     c.curator_type, c.curator_id, c.updated_at,
     v.document_id, v.version_number,
     COALESCE(i.id, ci.id) AS source_issue_id,
-    COALESCE(i.identifier, ci.identifier, '') AS source_issue_identifier,
+    COALESCE(w.issue_prefix || '-' || i.number::text, w.issue_prefix || '-' || ci.number::text, '') AS source_issue_identifier,
     COALESCE(i.title, ci.title, '') AS source_issue_title
 FROM attachment a
+JOIN workspace w ON w.id = a.workspace_id
 LEFT JOIN issue i ON a.issue_id IS NOT NULL AND a.issue_id = i.id
 LEFT JOIN comment cm ON a.comment_id IS NOT NULL AND a.comment_id = cm.id
 LEFT JOIN issue ci ON cm.issue_id = ci.id

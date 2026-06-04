@@ -124,6 +124,16 @@ export type {
   ListWebhookDeliveriesResponse,
 } from "./autopilot";
 export type {
+  Workflow,
+  WorkflowStep,
+  CreateWorkflowRequest,
+  CreateWorkflowStepRequest,
+  BindWorkflowRequest,
+  BindWorkflowResponse,
+  ListWorkflowsResponse,
+  GetWorkflowResponse,
+} from "./workflow";
+export type {
   Squad,
   SquadMember,
   SquadMemberType,

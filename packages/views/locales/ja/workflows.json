@@ -1,0 +1,53 @@
+{
+  "page": {
+    "title": "Workflows",
+    "new_workflow": "New workflow",
+    "empty_title": "No workflows yet",
+    "empty_hint": "Create a workflow to hand issues off between agents automatically."
+  },
+  "table": {
+    "name": "Name",
+    "steps": "Steps",
+    "created": "Created"
+  },
+  "create": {
+    "title": "New workflow",
+    "name_label": "Name",
+    "name_placeholder": "e.g. Feature delivery",
+    "description_label": "Description",
+    "description_placeholder": "What this workflow is for (optional)",
+    "cancel": "Cancel",
+    "submit": "Create workflow",
+    "toast_created": "Workflow created"
+  },
+  "detail": {
+    "not_found": "Workflow not found",
+    "steps_title": "Steps",
+    "no_steps": "No steps yet. Add the first step to define who starts the workflow.",
+    "add_step": "Add step",
+    "bind_issue": "Start on an issue",
+    "step_flow": "{{start}} → advances on {{advance}}",
+    "unknown_agent": "Unknown agent"
+  },
+  "step": {
+    "title": "Add step",
+    "agent_label": "Agent",
+    "agent_placeholder": "Select an agent",
+    "name_label": "Step name",
+    "name_placeholder": "e.g. Backend, Frontend, QA",
+    "start_status_label": "Start status",
+    "advance_status_label": "Advance when status becomes",
+    "cancel": "Cancel",
+    "submit": "Add step",
+    "toast_added": "Step added"
+  },
+  "bind": {
+    "title": "Start workflow on an issue",
+    "issue_label": "Issue",
+    "issue_placeholder": "Issue key or ID (e.g. TAU-123)",
+    "help": "The issue is assigned to the first step's agent and the workflow begins.",
+    "cancel": "Cancel",
+    "submit": "Start workflow",
+    "toast_started": "Workflow started on the issue"
+  }
+}

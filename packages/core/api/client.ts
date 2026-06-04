@@ -93,6 +93,13 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  Workflow,
+  WorkflowStep,
+  CreateWorkflowRequest,
+  CreateWorkflowStepRequest,
+  BindWorkflowResponse,
+  ListWorkflowsResponse,
+  GetWorkflowResponse,
   ListWebhookDeliveriesResponse,
   WebhookDelivery,
   NotificationPreferenceResponse,
@@ -1927,6 +1934,36 @@ export class ApiClient {
 
   async deleteAutopilot(id: string): Promise<void> {
     await this.fetch(`/api/autopilots/${id}`, { method: "DELETE" });
+  }
+
+  // Workflows (handoff workflows)
+  async listWorkflows(): Promise<ListWorkflowsResponse> {
+    return this.fetch("/api/workflows");
+  }
+
+  async getWorkflow(id: string): Promise<GetWorkflowResponse> {
+    return this.fetch(`/api/workflows/${id}`);
+  }
+
+  async createWorkflow(data: CreateWorkflowRequest): Promise<Workflow> {
+    return this.fetch("/api/workflows", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async createWorkflowStep(workflowId: string, data: CreateWorkflowStepRequest): Promise<WorkflowStep> {
+    return this.fetch(`/api/workflows/${workflowId}/steps`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async bindWorkflow(workflowId: string, issueId: string): Promise<BindWorkflowResponse> {
+    return this.fetch(`/api/workflows/${workflowId}/bind`, {
+      method: "POST",
+      body: JSON.stringify({ issue_id: issueId }),
+    });
   }
 
   async triggerAutopilot(id: string): Promise<AutopilotRun> {

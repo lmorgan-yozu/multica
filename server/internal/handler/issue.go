@@ -2466,6 +2466,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// fails best-effort.
 	if statusChanged {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
+		// Role-based handoff workflows: opt-in no-op unless the issue is bound
+		// to a workflow. Advances the chain when the current step's agent
+		// finishes (issue reaches the step's advance_status).
+		h.advanceWorkflowOnStatusChange(r.Context(), prevIssue, issue, actorType, actorID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2945,6 +2949,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// (MUL-2538). Best-effort; failure does not abort the batch.
 		if statusChanged {
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
+			h.advanceWorkflowOnStatusChange(r.Context(), prevIssue, issue, actorType, actorID)
 		}
 
 		updated++

@@ -407,6 +407,16 @@ type IssueToLabel struct {
 	LabelID pgtype.UUID `json:"label_id"`
 }
 
+type IssueWorkflowRun struct {
+	ID            pgtype.UUID        `json:"id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	WorkflowID    pgtype.UUID        `json:"workflow_id"`
+	CurrentStepID pgtype.UUID        `json:"current_step_id"`
+	State         string             `json:"state"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type LarkBindingToken struct {
 	TokenHash      string             `json:"token_hash"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -717,6 +727,29 @@ type WebhookDelivery struct {
 	ReceivedAt             pgtype.Timestamptz `json:"received_at"`
 	LastAttemptAt          pgtype.Timestamptz `json:"last_attempt_at"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+}
+
+type Workflow struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Name          string             `json:"name"`
+	Description   string             `json:"description"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ArchivedAt    pgtype.Timestamptz `json:"archived_at"`
+}
+
+type WorkflowStep struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkflowID    pgtype.UUID        `json:"workflow_id"`
+	StepOrder     int32              `json:"step_order"`
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	Name          string             `json:"name"`
+	StartStatus   string             `json:"start_status"`
+	AdvanceStatus string             `json:"advance_status"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type Workspace struct {

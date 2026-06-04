@@ -762,6 +762,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Handoff workflows (role-based agent orchestration).
+			r.Route("/api/workflows", func(r chi.Router) {
+				r.Get("/", h.ListWorkflows)
+				r.Post("/", h.CreateWorkflow)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetWorkflow)
+					r.Post("/steps", h.CreateWorkflowStep)
+					r.Post("/bind", h.BindIssueWorkflow)
+				})
+			})
+
 			// Pins
 			r.Route("/api/pins", func(r chi.Router) {
 				r.Get("/", h.ListPins)

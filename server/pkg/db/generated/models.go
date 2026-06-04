@@ -257,6 +257,48 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type DocumentComment struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	DocumentID  pgtype.UUID        `json:"document_id"`
+	ParentID    pgtype.UUID        `json:"parent_id"`
+	Content     string             `json:"content"`
+	AuthorType  string             `json:"author_type"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DocumentCuration struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	AttachmentID pgtype.UUID        `json:"attachment_id"`
+	Title        pgtype.Text        `json:"title"`
+	Summary      pgtype.Text        `json:"summary"`
+	Category     pgtype.Text        `json:"category"`
+	Tags         []string           `json:"tags"`
+	SortOrder    float64            `json:"sort_order"`
+	Pinned       bool               `json:"pinned"`
+	Archived     bool               `json:"archived"`
+	CuratorType  string             `json:"curator_type"`
+	CuratorID    pgtype.UUID        `json:"curator_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	DocumentID   pgtype.UUID        `json:"document_id"`
+}
+
+type DocumentVersion struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	DocumentID    pgtype.UUID        `json:"document_id"`
+	AttachmentID  pgtype.UUID        `json:"attachment_id"`
+	VersionNumber int32              `json:"version_number"`
+	Notes         pgtype.Text        `json:"notes"`
+	AuthorType    string             `json:"author_type"`
+	AuthorID      pgtype.UUID        `json:"author_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type Feedback struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`
@@ -463,7 +505,6 @@ type LarkInstallation struct {
 	AppSecretEncrypted []byte             `json:"app_secret_encrypted"`
 	TenantKey          pgtype.Text        `json:"tenant_key"`
 	BotOpenID          string             `json:"bot_open_id"`
-	BotUnionID         pgtype.Text        `json:"bot_union_id"`
 	InstallerUserID    pgtype.UUID        `json:"installer_user_id"`
 	Status             string             `json:"status"`
 	WsLeaseToken       pgtype.Text        `json:"ws_lease_token"`
@@ -471,6 +512,7 @@ type LarkInstallation struct {
 	InstalledAt        pgtype.Timestamptz `json:"installed_at"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	BotUnionID         pgtype.Text        `json:"bot_union_id"`
 }
 
 type LarkOutboundCardMessage struct {
@@ -492,6 +534,25 @@ type LarkUserBinding struct {
 	LarkOpenID     string             `json:"lark_open_id"`
 	UnionID        pgtype.Text        `json:"union_id"`
 	BoundAt        pgtype.Timestamptz `json:"bound_at"`
+}
+
+type LibrarySection struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	Name        string             `json:"name"`
+	Description pgtype.Text        `json:"description"`
+	SortOrder   float64            `json:"sort_order"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type LibrarySectionItem struct {
+	SectionID    pgtype.UUID        `json:"section_id"`
+	AttachmentID pgtype.UUID        `json:"attachment_id"`
+	Position     float64            `json:"position"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 type Member struct {

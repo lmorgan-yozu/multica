@@ -2,9 +2,11 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -103,9 +105,11 @@ func (h *Handler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create workflow")
 		return
 	}
-	resp := workflowToResponse(wf)
-	h.publish(protocol.EventIssueUpdated, workspaceID, "member", userID, map[string]any{"workflow": resp})
-	writeJSON(w, http.StatusCreated, resp)
+	// No realtime publish: there is no workflow-specific event type yet and
+	// reusing EventIssueUpdated would deliver a payload with no issue to
+	// issue:updated subscribers. The REST response is the only consumer until
+	// a frontend (and a dedicated event) lands.
+	writeJSON(w, http.StatusCreated, workflowToResponse(wf))
 }
 
 // GetWorkflow GET /api/workflows/{id} — workflow plus its ordered steps.
@@ -136,6 +140,17 @@ func (h *Handler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 		"workflow": workflowToResponse(wf),
 		"steps":    stepResp,
 	})
+}
+
+// isValidIssueStatus reports whether s is one of the issue.status CHECK values
+// (server/migrations/001_init.up.sql). Workflow steps reference issue statuses
+// for start_status / advance_status.
+func isValidIssueStatus(s string) bool {
+	switch s {
+	case "backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled":
+		return true
+	}
+	return false
 }
 
 type createWorkflowStepRequest struct {
@@ -185,6 +200,14 @@ func (h *Handler) CreateWorkflowStep(w http.ResponseWriter, r *http.Request) {
 	advanceStatus := req.AdvanceStatus
 	if advanceStatus == "" {
 		advanceStatus = "in_review"
+	}
+	if !isValidIssueStatus(startStatus) {
+		writeError(w, http.StatusBadRequest, "invalid start_status")
+		return
+	}
+	if !isValidIssueStatus(advanceStatus) {
+		writeError(w, http.StatusBadRequest, "invalid advance_status")
+		return
 	}
 
 	maxOrder, err := h.Queries.MaxWorkflowStepOrder(r.Context(), wf.ID)
@@ -262,6 +285,13 @@ func (h *Handler) BindIssueWorkflow(w http.ResponseWriter, r *http.Request) {
 		CurrentStepID: first.ID,
 	})
 	if err != nil {
+		// UNIQUE(issue_id) — a concurrent bind won the race between the check
+		// above and this insert. Report the conflict rather than a 500.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			writeError(w, http.StatusConflict, "issue is already bound to a workflow")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to bind issue")
 		return
 	}

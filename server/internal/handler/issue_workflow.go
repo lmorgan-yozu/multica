@@ -93,6 +93,16 @@ func (h *Handler) advanceToStep(ctx context.Context, run db.IssueWorkflowRun, is
 		return
 	}
 
+	// Cancel any still-queued/dispatched task for the outgoing step's agent
+	// before reassigning. We reassign via a narrow query (not UpdateIssue), so
+	// UpdateIssue's own CancelTasksForIssue-on-assignee-change never runs here;
+	// without this, a stale task for the previous agent could execute against
+	// an issue that has already moved on to the next step.
+	if err := h.TaskService.CancelTasksForIssue(ctx, issue.ID); err != nil {
+		slog.Warn("workflow advance: cancel outgoing tasks failed",
+			"error", err, "issue_id", uuidToString(issue.ID))
+	}
+
 	updated, err := h.Queries.AssignIssueToWorkflowStep(ctx, db.AssignIssueToWorkflowStepParams{
 		ID:         issue.ID,
 		AssigneeID: nextStep.AgentID,

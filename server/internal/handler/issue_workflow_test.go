@@ -255,3 +255,68 @@ func workflowCommentMentions(t *testing.T, issueID, agentID string) bool {
 	}
 	return false
 }
+
+// TestBindIssueWorkflowHandler covers the user-facing bind entry point: it
+// should start the run at step 1, assign + restatus the issue, and reject a
+// second bind with 409.
+func TestBindIssueWorkflowHandler(t *testing.T) {
+	ctx := context.Background()
+	q := testHandler.Queries
+
+	agentA := createHandlerTestAgent(t, "bind-agent-A "+time.Now().Format(time.RFC3339Nano), nil)
+	wf, err := q.CreateWorkflow(ctx, db.CreateWorkflowParams{
+		WorkspaceID: parseUUID(testWorkspaceID), Name: "bind wf " + time.Now().Format(time.RFC3339Nano),
+		Description: "", CreatedByType: "member", CreatedByID: parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM workflow WHERE id = $1`, uuidToString(wf.ID)) })
+	if _, err := q.CreateWorkflowStep(ctx, db.CreateWorkflowStepParams{
+		WorkflowID: wf.ID, StepOrder: 1, AgentID: parseUUID(agentA),
+		Name: "Backend", StartStatus: "todo", AdvanceStatus: "in_review",
+	}); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "bind issue " + time.Now().Format(time.RFC3339Nano), "status": "backlog",
+	})
+	testHandler.CreateIssue(w, req)
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issue.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issue.ID)
+	})
+
+	wfID := uuidToString(wf.ID)
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/workflows/"+wfID+"/bind", map[string]any{"issue_id": issue.ID})
+	req = withURLParam(req, "id", wfID)
+	testHandler.BindIssueWorkflow(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("bind: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	reloaded, err := q.GetIssue(ctx, parseUUID(issue.ID))
+	if err != nil {
+		t.Fatalf("reload issue: %v", err)
+	}
+	if uuidToString(reloaded.AssigneeID) != agentA {
+		t.Fatalf("expected issue assigned to step 1 agent")
+	}
+	if reloaded.Status != "todo" {
+		t.Fatalf("expected status set to step start_status 'todo', got %q", reloaded.Status)
+	}
+
+	// Second bind must conflict.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/workflows/"+wfID+"/bind", map[string]any{"issue_id": issue.ID})
+	req = withURLParam(req, "id", wfID)
+	testHandler.BindIssueWorkflow(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("second bind: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}

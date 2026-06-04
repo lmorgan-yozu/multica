@@ -22,8 +22,10 @@ CREATE TABLE workflow_step (
     step_order     INTEGER NOT NULL,
     agent_id       UUID NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
     name           TEXT NOT NULL DEFAULT '',
-    start_status   TEXT NOT NULL DEFAULT 'todo',
-    advance_status TEXT NOT NULL DEFAULT 'in_review',
+    start_status   TEXT NOT NULL DEFAULT 'todo'
+        CHECK (start_status IN ('backlog', 'todo', 'in_progress', 'in_review', 'done', 'blocked', 'cancelled')),
+    advance_status TEXT NOT NULL DEFAULT 'in_review'
+        CHECK (advance_status IN ('backlog', 'todo', 'in_progress', 'in_review', 'done', 'blocked', 'cancelled')),
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (workflow_id, step_order)
 );
@@ -34,8 +36,11 @@ CREATE TABLE issue_workflow_run (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     issue_id        UUID NOT NULL UNIQUE REFERENCES issue(id) ON DELETE CASCADE,
     workflow_id     UUID NOT NULL REFERENCES workflow(id) ON DELETE CASCADE,
-    current_step_id UUID NOT NULL REFERENCES workflow_step(id),
-    state           TEXT NOT NULL DEFAULT 'active',
+    -- CASCADE so deleting an agent (→ its workflow_step rows) tears down any
+    -- run currently sitting on that step rather than failing with an FK error.
+    current_step_id UUID NOT NULL REFERENCES workflow_step(id) ON DELETE CASCADE,
+    state           TEXT NOT NULL DEFAULT 'active'
+        CHECK (state IN ('active', 'completed', 'cancelled')),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );

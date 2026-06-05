@@ -229,17 +229,17 @@ ORDER BY v.version_number DESC
 	versions := []DocumentVersion{}
 	for rows.Next() {
 		var (
-			id           pgtype.UUID
-			docID        pgtype.UUID
-			attID        pgtype.UUID
-			versionNum   int
-			notes        pgtype.Text
-			authorType   string
-			authorID     pgtype.UUID
-			createdAt    pgtype.Timestamptz
-			filename     string
-			sizeBytes    int64
-			contentType  string
+			id          pgtype.UUID
+			docID       pgtype.UUID
+			attID       pgtype.UUID
+			versionNum  int
+			notes       pgtype.Text
+			authorType  string
+			authorID    pgtype.UUID
+			createdAt   pgtype.Timestamptz
+			filename    string
+			sizeBytes   int64
+			contentType string
 		)
 		if err := rows.Scan(&id, &docID, &attID, &versionNum, &notes,
 			&authorType, &authorID, &createdAt, &filename, &sizeBytes, &contentType); err != nil {
@@ -271,9 +271,20 @@ ORDER BY v.version_number DESC
 // pattern mentioned in migration 059 — older attachments don't get document
 // identities until they're first accessed through a versioning-aware path.
 func (h *Handler) ensureDocumentIdentity(r *http.Request, workspaceID, attachmentID, actorType, actorID string) (string, error) {
-	const existsSQL = `SELECT document_id FROM document_version WHERE attachment_id = $1 LIMIT 1`
+	// Tenant guard: the attachment must exist in this workspace before we read
+	// or create any document identity for it. Without this, an attachment_id
+	// from another workspace would resolve/create a document here (IDOR). This
+	// is the single chokepoint for the versioning and comment paths, which all
+	// call ensureDocumentIdentity first.
+	const attachmentGuardSQL = `SELECT 1 FROM attachment WHERE id = $1 AND workspace_id = $2`
+	var attachmentGuard int
+	if err := h.DB.QueryRow(r.Context(), attachmentGuardSQL, parseUUID(attachmentID), parseUUID(workspaceID)).Scan(&attachmentGuard); err != nil {
+		return "", err
+	}
+
+	const existsSQL = `SELECT document_id FROM document_version WHERE attachment_id = $1 AND workspace_id = $2 LIMIT 1`
 	var docID pgtype.UUID
-	err := h.DB.QueryRow(r.Context(), existsSQL, parseUUID(attachmentID)).Scan(&docID)
+	err := h.DB.QueryRow(r.Context(), existsSQL, parseUUID(attachmentID), parseUUID(workspaceID)).Scan(&docID)
 	if err == nil {
 		return uuidToString(docID), nil
 	}
@@ -505,20 +516,41 @@ func (h *Handler) DeleteDocumentComment(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "comment id is required")
 		return
 	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
 	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID == "" {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
+	_, actorID := h.resolveActor(r, userID, workspaceID)
 
-	const delSQL = `DELETE FROM document_comment WHERE id = $1 AND workspace_id = $2`
-	tag, err := h.DB.Exec(r.Context(), delSQL, parseUUID(commentID), parseUUID(workspaceID))
+	// Author-or-(owner/admin) only: a comment may be deleted by its author or
+	// by a workspace owner/admin. Previously any workspace member could delete
+	// any comment (broken access control).
+	const delSQL = `
+DELETE FROM document_comment
+WHERE id = $1 AND workspace_id = $2
+  AND (author_id = $3
+       OR EXISTS (SELECT 1 FROM member WHERE user_id = $4 AND workspace_id = $2 AND role IN ('owner', 'admin')))
+`
+	tag, err := h.DB.Exec(r.Context(), delSQL,
+		parseUUID(commentID), parseUUID(workspaceID), parseUUID(actorID), parseUUID(userID))
 	if err != nil {
 		slog.Warn("delete document comment failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete comment")
 		return
 	}
 	if tag.RowsAffected() == 0 {
+		// Distinguish "exists but not yours" (403) from "missing" (404).
+		const existsSQL = `SELECT 1 FROM document_comment WHERE id = $1 AND workspace_id = $2`
+		var exists int
+		if err := h.DB.QueryRow(r.Context(), existsSQL, parseUUID(commentID), parseUUID(workspaceID)).Scan(&exists); err == nil {
+			writeError(w, http.StatusForbidden, "only the author or a workspace owner/admin can delete this comment")
+			return
+		}
 		writeError(w, http.StatusNotFound, "comment not found")
 		return
 	}

@@ -24,26 +24,26 @@ import (
 // tags, order, pinned/archived) so the UI can render a ready-to-browse doc
 // without a second round-trip.
 type Document struct {
-	AttachmentID string    `json:"attachment_id"`
-	IssueID      *string   `json:"issue_id"`
-	CommentID    *string   `json:"comment_id"`
-	Filename     string    `json:"filename"`
-	ContentType  string    `json:"content_type"`
-	SizeBytes    int64     `json:"size_bytes"`
-	DownloadURL  string    `json:"download_url"`
-	InlineURL    string    `json:"inline_url"`
-	CreatedAt    string    `json:"created_at"`
-	UploaderType string    `json:"uploader_type"`
-	UploaderID   string    `json:"uploader_id"`
+	AttachmentID string  `json:"attachment_id"`
+	IssueID      *string `json:"issue_id"`
+	CommentID    *string `json:"comment_id"`
+	Filename     string  `json:"filename"`
+	ContentType  string  `json:"content_type"`
+	SizeBytes    int64   `json:"size_bytes"`
+	DownloadURL  string  `json:"download_url"`
+	InlineURL    string  `json:"inline_url"`
+	CreatedAt    string  `json:"created_at"`
+	UploaderType string  `json:"uploader_type"`
+	UploaderID   string  `json:"uploader_id"`
 
 	// Curation fields. Zero values when no curation record exists yet.
-	Title     *string   `json:"title,omitempty"`
-	Summary   *string   `json:"summary,omitempty"`
-	Category  *string   `json:"category,omitempty"`
-	Tags      []string  `json:"tags"`
-	SortOrder float64   `json:"sort_order"`
-	Pinned    bool      `json:"pinned"`
-	Archived  bool      `json:"archived"`
+	Title     *string  `json:"title,omitempty"`
+	Summary   *string  `json:"summary,omitempty"`
+	Category  *string  `json:"category,omitempty"`
+	Tags      []string `json:"tags"`
+	SortOrder float64  `json:"sort_order"`
+	Pinned    bool     `json:"pinned"`
+	Archived  bool     `json:"archived"`
 
 	CuratorType *string `json:"curator_type,omitempty"`
 	CuratorID   *string `json:"curator_id,omitempty"`
@@ -74,9 +74,9 @@ type IssueLibraryResponse struct {
 
 type ProjectLibraryDocument struct {
 	Document
-	SourceIssueID         string  `json:"source_issue_id"`
-	SourceIssueIdentifier string  `json:"source_issue_identifier"`
-	SourceIssueTitle      string  `json:"source_issue_title"`
+	SourceIssueID         string `json:"source_issue_id"`
+	SourceIssueIdentifier string `json:"source_issue_identifier"`
+	SourceIssueTitle      string `json:"source_issue_title"`
 }
 
 type ProjectLibraryResponse struct {
@@ -688,9 +688,23 @@ RETURNING id, created_at, updated_at
 	var issueParam, projectParam pgtype.UUID
 	if hasIssue {
 		issueParam = parseUUID(payload.IssueID)
+		// The issue must belong to this workspace (prevents creating a section
+		// bound to a cross-tenant issue).
+		var guard int
+		if err := h.DB.QueryRow(r.Context(), `SELECT 1 FROM issue WHERE id = $1 AND workspace_id = $2`,
+			issueParam, parseUUID(workspaceID)).Scan(&guard); err != nil {
+			writeError(w, http.StatusNotFound, "issue not found in workspace")
+			return
+		}
 	}
 	if hasProject {
 		projectParam = parseUUID(payload.ProjectID)
+		var guard int
+		if err := h.DB.QueryRow(r.Context(), `SELECT 1 FROM project WHERE id = $1 AND workspace_id = $2`,
+			projectParam, parseUUID(workspaceID)).Scan(&guard); err != nil {
+			writeError(w, http.StatusNotFound, "project not found in workspace")
+			return
+		}
 	}
 
 	var (
@@ -743,6 +757,25 @@ func (h *Handler) AddSectionItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "attachment_id is required")
 		return
 	}
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	// Both the section and the attachment must belong to this workspace
+	// (prevents writing an item into a cross-tenant section or referencing a
+	// cross-tenant attachment).
+	var guard int
+	if err := h.DB.QueryRow(r.Context(), `SELECT 1 FROM library_section WHERE id = $1 AND workspace_id = $2`,
+		parseUUID(sectionID), parseUUID(workspaceID)).Scan(&guard); err != nil {
+		writeError(w, http.StatusNotFound, "section not found in workspace")
+		return
+	}
+	if err := h.DB.QueryRow(r.Context(), `SELECT 1 FROM attachment WHERE id = $1 AND workspace_id = $2`,
+		parseUUID(payload.AttachmentID), parseUUID(workspaceID)).Scan(&guard); err != nil {
+		writeError(w, http.StatusNotFound, "attachment not found in workspace")
+		return
+	}
 
 	const insertSQL = `
 INSERT INTO library_section_item (section_id, attachment_id, position)
@@ -771,8 +804,20 @@ func (h *Handler) RemoveSectionItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	const delSQL = `DELETE FROM library_section_item WHERE section_id = $1 AND attachment_id = $2`
-	_, err := h.DB.Exec(r.Context(), delSQL, parseUUID(sectionID), parseUUID(attachmentID))
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	// Scope the delete to a section owned by this workspace so a caller can't
+	// remove items from another tenant's section.
+	const delSQL = `
+DELETE FROM library_section_item lsi
+USING library_section s
+WHERE lsi.section_id = $1 AND lsi.attachment_id = $2
+  AND s.id = lsi.section_id AND s.workspace_id = $3
+`
+	_, err := h.DB.Exec(r.Context(), delSQL, parseUUID(sectionID), parseUUID(attachmentID), parseUUID(workspaceID))
 	if err != nil {
 		slog.Warn("remove section item failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to remove section item")

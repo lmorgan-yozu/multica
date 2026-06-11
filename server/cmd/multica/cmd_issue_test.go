@@ -409,6 +409,125 @@ func TestRunIssuePullRequestsTableIncludesCoreFields(t *testing.T) {
 	}
 }
 
+func newIssueUsageTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "usage"}
+	cmd.Flags().String("output", "table", "")
+	cmd.Flags().String("agent-id", "", "")
+	cmd.Flags().String("since", "", "")
+	cmd.Flags().String("until", "", "")
+	return cmd
+}
+
+func TestRunIssueUsagePassesFiltersAndPrintsJSON(t *testing.T) {
+	var gotPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.RequestURI())
+		switch r.URL.Path {
+		case "/api/issues/MUL-26":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-uuid",
+				"identifier": "MUL-26",
+				"title":      "Usage",
+			})
+		case "/api/issues/issue-uuid/usage":
+			if r.URL.Query().Get("agent_id") != "agent-uuid" {
+				t.Errorf("agent_id query = %q, want agent-uuid", r.URL.Query().Get("agent_id"))
+			}
+			if r.URL.Query().Get("since") != "2026-06-01T00:00:00Z" {
+				t.Errorf("since query = %q", r.URL.Query().Get("since"))
+			}
+			if r.URL.Query().Get("until") != "2026-06-02T00:00:00Z" {
+				t.Errorf("until query = %q", r.URL.Query().Get("until"))
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"total_input_tokens":       100,
+				"total_output_tokens":      200,
+				"task_count":               2,
+				"missing_usage_task_count": 1,
+				"usage_status":             "partial",
+				"task_breakdown": []map[string]any{{
+					"task_id":      "task-uuid",
+					"usage_status": "missing",
+				}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueUsageTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	_ = cmd.Flags().Set("agent-id", "agent-uuid")
+	_ = cmd.Flags().Set("since", "2026-06-01T00:00:00Z")
+	_ = cmd.Flags().Set("until", "2026-06-02T00:00:00Z")
+	out, err := captureStdout(t, func() error {
+		return runIssueUsage(cmd, []string{"MUL-26"})
+	})
+	if err != nil {
+		t.Fatalf("runIssueUsage: %v", err)
+	}
+	if want := []string{"/api/issues/MUL-26", "/api/issues/issue-uuid/usage?agent_id=agent-uuid&since=2026-06-01T00%3A00%3A00Z&until=2026-06-02T00%3A00%3A00Z"}; fmt.Sprint(gotPaths) != fmt.Sprint(want) {
+		t.Fatalf("paths = %v, want %v", gotPaths, want)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, out)
+	}
+	if payload["usage_status"] != "partial" || payload["missing_usage_task_count"] != float64(1) {
+		t.Fatalf("unexpected usage payload: %#v", payload)
+	}
+}
+
+func TestPrintIssueUsageTableIncludesBreakdownsAndMissingStatus(t *testing.T) {
+	result := map[string]any{
+		"total_input_tokens":       float64(100),
+		"total_output_tokens":      float64(200),
+		"total_cache_read_tokens":  float64(3),
+		"total_cache_write_tokens": float64(4),
+		"task_count":               float64(2),
+		"missing_usage_task_count": float64(1),
+		"usage_status":             "partial",
+		"agent_breakdown": []any{map[string]any{
+			"agent_id":                 "agent-uuid-123456",
+			"provider":                 "codex",
+			"model":                    "gpt-test",
+			"input_tokens":             float64(100),
+			"output_tokens":            float64(200),
+			"cache_read_tokens":        float64(3),
+			"cache_write_tokens":       float64(4),
+			"task_count":               float64(2),
+			"missing_usage_task_count": float64(1),
+			"usage_status":             "partial",
+		}},
+		"task_breakdown": []any{map[string]any{
+			"task_id":            "task-uuid-123456",
+			"usage_status":       "missing",
+			"input_tokens":       float64(0),
+			"output_tokens":      float64(0),
+			"cache_read_tokens":  float64(0),
+			"cache_write_tokens": float64(0),
+		}},
+	}
+
+	out, err := captureStdout(t, func() error {
+		printIssueUsageTable(result)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("capture table: %v", err)
+	}
+	for _, want := range []string{"KIND", "summary", "agent", "task", "partial", "missing", "agent-uu", "task-uui", "codex", "gpt-test"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("table output missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestTruncateID(t *testing.T) {
 	tests := []struct {
 		name string

@@ -109,6 +109,13 @@ var issuePullRequestsCmd = &cobra.Command{
 	RunE:    runIssuePullRequests,
 }
 
+var issueUsageCmd = &cobra.Command{
+	Use:   "usage <id>",
+	Short: "Show token usage and missing usage for an issue",
+	Args:  exactArgs(1),
+	RunE:  runIssueUsage,
+}
+
 var issueCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new issue",
@@ -242,6 +249,7 @@ func init() {
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueGetCmd)
 	issueCmd.AddCommand(issuePullRequestsCmd)
+	issueCmd.AddCommand(issueUsageCmd)
 	issueCmd.AddCommand(issueCreateCmd)
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
@@ -279,6 +287,12 @@ func init() {
 
 	// issue pull-requests
 	issuePullRequestsCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// issue usage
+	issueUsageCmd.Flags().String("output", "table", "Output format: table or json")
+	issueUsageCmd.Flags().String("agent-id", "", "Filter by agent UUID")
+	issueUsageCmd.Flags().String("since", "", "Only include usage/tasks at or after this RFC3339 timestamp")
+	issueUsageCmd.Flags().String("until", "", "Only include usage/tasks before this RFC3339 timestamp")
 
 	// issue create
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
@@ -531,6 +545,118 @@ func runIssuePullRequests(cmd *cobra.Command, args []string) error {
 	prs, _ := result["pull_requests"].([]any)
 	printIssuePullRequestsTable(normalizePullRequestList(prs))
 	return nil
+}
+
+func runIssueUsage(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	params := url.Values{}
+	if v, _ := cmd.Flags().GetString("agent-id"); v != "" {
+		params.Set("agent_id", v)
+	}
+	if v, _ := cmd.Flags().GetString("since"); v != "" {
+		params.Set("since", v)
+	}
+	if v, _ := cmd.Flags().GetString("until"); v != "" {
+		params.Set("until", v)
+	}
+
+	path := "/api/issues/" + url.PathEscape(issueRef.ID) + "/usage"
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
+
+	var result map[string]any
+	if err := client.GetJSON(ctx, path, &result); err != nil {
+		return fmt.Errorf("get issue usage: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	printIssueUsageTable(result)
+	return nil
+}
+
+func printIssueUsageTable(result map[string]any) {
+	headers := []string{"KIND", "ID", "STATUS", "PROVIDER", "MODEL", "INPUT", "OUTPUT", "CACHE READ", "CACHE WRITE", "TASKS", "MISSING"}
+	rows := [][]string{{
+		"summary",
+		"",
+		strVal(result, "usage_status"),
+		"",
+		"",
+		strVal(result, "total_input_tokens"),
+		strVal(result, "total_output_tokens"),
+		strVal(result, "total_cache_read_tokens"),
+		strVal(result, "total_cache_write_tokens"),
+		strVal(result, "task_count"),
+		strVal(result, "missing_usage_task_count"),
+	}}
+
+	if byAgent, _ := result["agent_breakdown"].([]any); len(byAgent) > 0 {
+		for _, raw := range byAgent {
+			row, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			rows = append(rows, []string{
+				"agent",
+				truncateID(strVal(row, "agent_id")),
+				strVal(row, "usage_status"),
+				strVal(row, "provider"),
+				strVal(row, "model"),
+				strVal(row, "input_tokens"),
+				strVal(row, "output_tokens"),
+				strVal(row, "cache_read_tokens"),
+				strVal(row, "cache_write_tokens"),
+				strVal(row, "task_count"),
+				strVal(row, "missing_usage_task_count"),
+			})
+		}
+	}
+
+	if byTask, _ := result["task_breakdown"].([]any); len(byTask) > 0 {
+		for _, raw := range byTask {
+			row, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			rows = append(rows, []string{
+				"task",
+				truncateID(strVal(row, "task_id")),
+				strVal(row, "usage_status"),
+				strVal(row, "provider"),
+				strVal(row, "model"),
+				strVal(row, "input_tokens"),
+				strVal(row, "output_tokens"),
+				strVal(row, "cache_read_tokens"),
+				strVal(row, "cache_write_tokens"),
+				"1",
+				func() string {
+					if strVal(row, "usage_status") == "missing" {
+						return "1"
+					}
+					return "0"
+				}(),
+			})
+		}
+	}
+
+	cli.PrintTable(os.Stdout, headers, rows)
 }
 
 func normalizePullRequestList(raw []any) []map[string]any {

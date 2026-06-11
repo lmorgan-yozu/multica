@@ -9,6 +9,7 @@ import {
   estimateCost,
   estimateCostBreakdown,
   formatShortDate,
+  isModelPriced,
   todayIso,
   weekStartIso,
   type DailyTokenData,
@@ -124,6 +125,23 @@ export interface DashboardTokenTotals {
   cacheWrite: number;
   cost: number;
   taskCount: number;
+}
+
+type DashboardPriceable = Pick<
+  DashboardUsageDaily | DashboardUsageByAgent,
+  "model" | "input_tokens" | "output_tokens" | "cache_read_tokens" | "cache_write_tokens"
+>;
+
+export function collectUnpricedDashboardModels(
+  rows: readonly DashboardPriceable[],
+): string[] {
+  const set = new Set<string>();
+  for (const r of rows) {
+    const tokens =
+      r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
+    if (tokens > 0 && r.model && !isModelPriced(r.model)) set.add(r.model);
+  }
+  return Array.from(set).toSorted();
 }
 
 // Whole-window totals for the KPI tiles. taskCount sums DISTINCT task counts

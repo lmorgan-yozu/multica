@@ -4,6 +4,7 @@ import {
   aggregateDailyCost,
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
+  collectUnpricedDashboardModels,
   computeDailyTotals,
   formatDuration,
   mergeAgentDashboardRows,
@@ -121,6 +122,43 @@ describe("computeDailyTotals", () => {
     expect(totals.input).toBe(3_000_000);
     expect(totals.cost).toBe(9); // 3M × $3/M
     expect(totals.taskCount).toBe(5);
+  });
+});
+
+describe("collectUnpricedDashboardModels", () => {
+  it("returns unique sorted unpriced models that have token usage", () => {
+    const models = collectUnpricedDashboardModels([
+      {
+        model: "zzz-unknown",
+        input_tokens: 10,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+      },
+      {
+        model: "claude-sonnet-4-6",
+        input_tokens: 10,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+      },
+      {
+        model: "aaa-unknown",
+        input_tokens: 0,
+        output_tokens: 5,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+      },
+      {
+        model: "zzz-unknown",
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+      },
+    ]);
+
+    expect(models).toEqual(["aaa-unknown", "zzz-unknown"]);
   });
 });
 

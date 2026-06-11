@@ -38,6 +38,10 @@
     "title_tasks": "週別タスク",
     "partial_label": "{{range}} (一部 · 7日中 {{covered}}日)"
   },
+  "pricing": {
+    "unpriced_notice_one": "{{count}} 個のモデルに管理された価格がないため、そのトークンはコスト合計から除外されています。",
+    "unpriced_notice_other": "{{count}} 個のモデルに管理された価格がないため、そのトークンはコスト合計から除外されています。"
+  },
   "leaderboard": {
     "title": "リーダーボード",
     "caption": "{{count}} 件のエージェント",

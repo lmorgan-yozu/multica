@@ -38,6 +38,10 @@
     "title_tasks": "每周任务数",
     "partial_label": "{{range}}（未满 · 已过 {{covered}} / 7 天）"
   },
+  "pricing": {
+    "unpriced_notice_one": "{{count}} 个模型没有维护价格，因此其 Token 未计入费用总计。",
+    "unpriced_notice_other": "{{count}} 个模型没有维护价格，因此其 Token 未计入费用总计。"
+  },
   "leaderboard": {
     "title": "排行榜",
     "caption": "{{count}} 个智能体",

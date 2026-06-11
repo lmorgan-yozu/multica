@@ -674,6 +674,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)
+					r.Post("/handoffs", h.CreateHandoff)
+					r.Get("/handoffs", h.ListHandoffs)
 					r.Get("/timeline", h.ListTimeline)
 					r.Get("/subscribers", h.ListIssueSubscribers)
 					r.Post("/subscribe", h.SubscribeToIssue)
@@ -827,6 +829,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/reactions", h.AddReaction)
 				r.Delete("/reactions", h.RemoveReaction)
 			})
+			r.Get("/api/handoffs/{id}", h.GetHandoff)
 
 			// Agents
 			r.Route("/api/agents", func(r chi.Router) {

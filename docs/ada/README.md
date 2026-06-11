@@ -18,7 +18,7 @@ Hard rules for this repository:
 - The deployed instance (agents.tauntondene.io) runs this code — the
   platform you are modifying is the platform the team runs on. Migrations
   and deploys are production changes; staging first, prod is human-gated.
-- **Model policy:** Favour the Fable model (`claude-fable-5`) for deep, complex, or cross-cutting work. Use Codex/Gemini for simple, well-specified pieces.
+- **Model policy:** Favour the Fable model (`claude-fable-5`) for deep, complex, ambiguous, or cross-cutting work. Use the cheaper Codex/Gemini roles for simple, small, well-specified pieces (explicit human direction).
 - **Vision is intent:** Vision documents are intent, not a spec. Agents should propose missing capabilities as new issues to the PO.
 
 Contents:

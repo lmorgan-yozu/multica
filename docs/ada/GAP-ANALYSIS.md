@@ -42,6 +42,6 @@ affordances and can trail.
   (the workflows feature's "strictly opt-in, bounded blast radius" pattern
   is the template).
 - The live instance runs this code; migrations must be reversible and
-  staging-tested. Prod deploys are human-gated.
+  staging-tested. Prod deploys are allowed under backup+rollback discipline.
 - Human override must always exist for any enforcement feature (audited
   owner/admin force-transition).

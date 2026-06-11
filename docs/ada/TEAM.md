@@ -39,7 +39,7 @@ Engineer (in_progress → in_review, reassign Code Reviewer)
   → Code Reviewer (approve → reassign QA; or back to engineer)
     → QA Engineer (pass → reassign Product Owner; or back to engineer)
       → Product Owner acceptance (→ DevOps for staging deploy, or done)
-        → DevOps (staging deploy + checks; prod prepared, human executes)
+        → DevOps (staging deploy + checks; prod deploy with verified backup)
 Security Reviewer: on referral, anywhere in the chain; their no is final.
 ```
 
@@ -59,6 +59,12 @@ a Claude agent, mirroring the practice described in the Arcus Q&R.
 - Explicit per-role review protocols ("when done, set X and reassign Y")
   are what make hand-offs reliable — never leave finished work unassigned.
 - Casting-vote assignments per domain (technical → Tech Lead, product →
+  PO, ship/no-ship → QA, security → veto) resolve deadlocks without humans.
+- Backlog status = parked (no triggers); todo = an assigned agent fires.
+  Use backlog for staged work, promote deliberately.
+- Autopilots work as orchestration ticks (wave-manager pattern): cap
+  concurrent chains, never re-trigger in-flight work, report to one issue.
+��
   PO, ship/no-ship → QA, security → veto) resolve deadlocks without humans.
 - Backlog status = parked (no triggers); todo = an assigned agent fires.
   Use backlog for staged work, promote deliberately.

@@ -1,0 +1,13 @@
+-- ADA-44 (session-cap resilience, slice 1): when a task fails on a provider
+-- usage/session cap (failure_reason agent_error.provider_quota_limit or
+-- agent_error.provider_capacity_or_rate_limit), the failure pipeline records
+-- when work can resume — the provider's parsed reset time, or now + the
+-- workspace's configured default backoff. NULL for every other failure.
+-- Slice 2's scheduler sweep re-enqueues failed tasks whose resume_at has
+-- passed; until then the column is informational (API/CLI surfacing only).
+--
+-- Nullable + no default: metadata-only ALTER, no table rewrite, safe on the
+-- hot agent_task_queue. The partial index for the sweep lives in 118 (it
+-- needs CONCURRENTLY, which requires its own single-statement migration —
+-- see 114 for the rationale).
+ALTER TABLE agent_task_queue ADD COLUMN resume_at TIMESTAMPTZ;

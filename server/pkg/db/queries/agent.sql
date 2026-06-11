@@ -433,6 +433,15 @@ SET status = 'failed',
 WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
 RETURNING *;
 
+-- name: SetAgentTaskResumeAt :exec
+-- ADA-44: stamps the cap-resume schedule on a freshly-failed task. Guarded
+-- on status='failed' so a row that has since been retried, requeued, or
+-- cancelled can never pick up a stale resume time — the hook runs
+-- best-effort after the failure write, outside its transaction.
+UPDATE agent_task_queue
+SET resume_at = $2
+WHERE id = $1 AND status = 'failed';
+
 -- name: UpdateAgentTaskSession :exec
 -- Pins the resume pointer mid-flight so a daemon crash leaves a usable
 -- session_id/work_dir on the task row. No-op if the task is no longer

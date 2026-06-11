@@ -13,15 +13,27 @@ import (
 
 const getIssueUsageSummary = `-- name: GetIssueUsageSummary :one
 SELECT
-    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
-    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
-    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(tu.input_tokens), 0)::bigint       AS total_input_tokens,
+    COALESCE(SUM(tu.output_tokens), 0)::bigint      AS total_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint  AS total_cache_read_tokens,
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
-    COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
-JOIN agent_task_queue atq ON atq.id = tu.task_id
+    COUNT(DISTINCT atq.id)::int                     AS task_count,
+    COUNT(DISTINCT tu.task_id)::int                 AS usage_task_count,
+    (COUNT(DISTINCT atq.id) - COUNT(DISTINCT tu.task_id))::int AS missing_usage_task_count
+FROM agent_task_queue atq
+LEFT JOIN task_usage tu ON tu.task_id = atq.id
 WHERE atq.issue_id = $1
+  AND ($2::uuid IS NULL OR atq.agent_id = $2)
+  AND ($3::timestamptz IS NULL OR COALESCE(tu.created_at, atq.completed_at, atq.created_at) >= $3)
+  AND ($4::timestamptz IS NULL OR COALESCE(tu.created_at, atq.completed_at, atq.created_at) < $4)
 `
+
+type GetIssueUsageSummaryParams struct {
+	IssueID pgtype.UUID        `json:"issue_id"`
+	AgentID pgtype.UUID        `json:"agent_id"`
+	Since   pgtype.Timestamptz `json:"since"`
+	Until   pgtype.Timestamptz `json:"until"`
+}
 
 type GetIssueUsageSummaryRow struct {
 	TotalInputTokens      int64 `json:"total_input_tokens"`
@@ -29,10 +41,17 @@ type GetIssueUsageSummaryRow struct {
 	TotalCacheReadTokens  int64 `json:"total_cache_read_tokens"`
 	TotalCacheWriteTokens int64 `json:"total_cache_write_tokens"`
 	TaskCount             int32 `json:"task_count"`
+	UsageTaskCount        int32 `json:"usage_task_count"`
+	MissingUsageTaskCount int32 `json:"missing_usage_task_count"`
 }
 
-func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID) (GetIssueUsageSummaryRow, error) {
-	row := q.db.QueryRow(ctx, getIssueUsageSummary, issueID)
+func (q *Queries) GetIssueUsageSummary(ctx context.Context, arg GetIssueUsageSummaryParams) (GetIssueUsageSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getIssueUsageSummary,
+		arg.IssueID,
+		arg.AgentID,
+		arg.Since,
+		arg.Until,
+	)
 	var i GetIssueUsageSummaryRow
 	err := row.Scan(
 		&i.TotalInputTokens,
@@ -40,6 +59,8 @@ func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID)
 		&i.TotalCacheReadTokens,
 		&i.TotalCacheWriteTokens,
 		&i.TaskCount,
+		&i.UsageTaskCount,
+		&i.MissingUsageTaskCount,
 	)
 	return i, err
 }
@@ -241,6 +262,7 @@ FROM task_usage_hourly
 WHERE workspace_id = $1
   AND bucket_hour >= $2::timestamptz
   AND ($3::uuid IS NULL OR project_id = $3)
+  AND ($4::uuid IS NULL OR agent_id = $4)
 GROUP BY agent_id, model
 ORDER BY agent_id, model
 `
@@ -249,6 +271,7 @@ type ListDashboardUsageByAgentParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Since       pgtype.Timestamptz `json:"since"`
 	ProjectID   pgtype.UUID        `json:"project_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
 }
 
 type ListDashboardUsageByAgentRow struct {
@@ -274,7 +297,12 @@ type ListDashboardUsageByAgentRow struct {
 // frontend prefers `ListDashboardAgentRunTime` for the user-facing
 // "tasks" column, so this stays informational only.
 func (q *Queries) ListDashboardUsageByAgent(ctx context.Context, arg ListDashboardUsageByAgentParams) ([]ListDashboardUsageByAgentRow, error) {
-	rows, err := q.db.Query(ctx, listDashboardUsageByAgent, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	rows, err := q.db.Query(ctx, listDashboardUsageByAgent,
+		arg.WorkspaceID,
+		arg.Since,
+		arg.ProjectID,
+		arg.AgentID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -371,6 +399,164 @@ func (q *Queries) ListDashboardUsageDaily(ctx context.Context, arg ListDashboard
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
 			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueUsageByAgent = `-- name: ListIssueUsageByAgent :many
+SELECT
+    atq.agent_id,
+    tu.provider,
+    tu.model,
+    COALESCE(SUM(tu.input_tokens), 0)::bigint       AS input_tokens,
+    COALESCE(SUM(tu.output_tokens), 0)::bigint      AS output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint  AS cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS cache_write_tokens,
+    COUNT(DISTINCT atq.id)::int                     AS task_count,
+    COUNT(DISTINCT tu.task_id)::int                 AS usage_task_count,
+    (COUNT(DISTINCT atq.id) - COUNT(DISTINCT tu.task_id))::int AS missing_usage_task_count
+FROM agent_task_queue atq
+LEFT JOIN task_usage tu ON tu.task_id = atq.id
+WHERE atq.issue_id = $1
+  AND ($2::uuid IS NULL OR atq.agent_id = $2)
+  AND ($3::timestamptz IS NULL OR COALESCE(tu.created_at, atq.completed_at, atq.created_at) >= $3)
+  AND ($4::timestamptz IS NULL OR COALESCE(tu.created_at, atq.completed_at, atq.created_at) < $4)
+GROUP BY atq.agent_id, tu.provider, tu.model
+ORDER BY atq.agent_id, tu.provider, tu.model
+`
+
+type ListIssueUsageByAgentParams struct {
+	IssueID pgtype.UUID        `json:"issue_id"`
+	AgentID pgtype.UUID        `json:"agent_id"`
+	Since   pgtype.Timestamptz `json:"since"`
+	Until   pgtype.Timestamptz `json:"until"`
+}
+
+type ListIssueUsageByAgentRow struct {
+	AgentID               pgtype.UUID `json:"agent_id"`
+	Provider              pgtype.Text `json:"provider"`
+	Model                 pgtype.Text `json:"model"`
+	InputTokens           int64       `json:"input_tokens"`
+	OutputTokens          int64       `json:"output_tokens"`
+	CacheReadTokens       int64       `json:"cache_read_tokens"`
+	CacheWriteTokens      int64       `json:"cache_write_tokens"`
+	TaskCount             int32       `json:"task_count"`
+	UsageTaskCount        int32       `json:"usage_task_count"`
+	MissingUsageTaskCount int32       `json:"missing_usage_task_count"`
+}
+
+func (q *Queries) ListIssueUsageByAgent(ctx context.Context, arg ListIssueUsageByAgentParams) ([]ListIssueUsageByAgentRow, error) {
+	rows, err := q.db.Query(ctx, listIssueUsageByAgent,
+		arg.IssueID,
+		arg.AgentID,
+		arg.Since,
+		arg.Until,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueUsageByAgentRow{}
+	for rows.Next() {
+		var i ListIssueUsageByAgentRow
+		if err := rows.Scan(
+			&i.AgentID,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.TaskCount,
+			&i.UsageTaskCount,
+			&i.MissingUsageTaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueUsageByTask = `-- name: ListIssueUsageByTask :many
+SELECT
+    atq.id AS task_id,
+    atq.session_id,
+    atq.agent_id,
+    atq.status,
+    tu.provider,
+    tu.model,
+    COALESCE(tu.input_tokens, 0)::bigint       AS input_tokens,
+    COALESCE(tu.output_tokens, 0)::bigint      AS output_tokens,
+    COALESCE(tu.cache_read_tokens, 0)::bigint  AS cache_read_tokens,
+    COALESCE(tu.cache_write_tokens, 0)::bigint AS cache_write_tokens,
+    CASE WHEN tu.task_id IS NULL THEN 'missing' ELSE 'complete' END::text AS usage_status
+FROM agent_task_queue atq
+LEFT JOIN task_usage tu ON tu.task_id = atq.id
+WHERE atq.issue_id = $1
+  AND ($2::uuid IS NULL OR atq.agent_id = $2)
+  AND ($3::timestamptz IS NULL OR COALESCE(tu.created_at, atq.completed_at, atq.created_at) >= $3)
+  AND ($4::timestamptz IS NULL OR COALESCE(tu.created_at, atq.completed_at, atq.created_at) < $4)
+ORDER BY atq.created_at DESC, tu.provider, tu.model
+`
+
+type ListIssueUsageByTaskParams struct {
+	IssueID pgtype.UUID        `json:"issue_id"`
+	AgentID pgtype.UUID        `json:"agent_id"`
+	Since   pgtype.Timestamptz `json:"since"`
+	Until   pgtype.Timestamptz `json:"until"`
+}
+
+type ListIssueUsageByTaskRow struct {
+	TaskID           pgtype.UUID `json:"task_id"`
+	SessionID        pgtype.Text `json:"session_id"`
+	AgentID          pgtype.UUID `json:"agent_id"`
+	Status           string      `json:"status"`
+	Provider         pgtype.Text `json:"provider"`
+	Model            pgtype.Text `json:"model"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	UsageStatus      string      `json:"usage_status"`
+}
+
+func (q *Queries) ListIssueUsageByTask(ctx context.Context, arg ListIssueUsageByTaskParams) ([]ListIssueUsageByTaskRow, error) {
+	rows, err := q.db.Query(ctx, listIssueUsageByTask,
+		arg.IssueID,
+		arg.AgentID,
+		arg.Since,
+		arg.Until,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueUsageByTaskRow{}
+	for rows.Next() {
+		var i ListIssueUsageByTaskRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.SessionID,
+			&i.AgentID,
+			&i.Status,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.UsageStatus,
 		); err != nil {
 			return nil, err
 		}

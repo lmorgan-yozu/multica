@@ -247,6 +247,79 @@ func TestDashboardEndpoints(t *testing.T) {
 	}
 }
 
+func TestDashboardUsageByAgentFiltersAgentID(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+	var otherAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'Dashboard usage other agent', '', 'cloud', '{}'::jsonb, $2, 'private', 1, $3)
+		RETURNING id
+	`, testWorkspaceID, runtimeID, testUserID).Scan(&otherAgentID); err != nil {
+		t.Fatalf("create other agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, otherAgentID) })
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM task_usage_hourly WHERE runtime_id = $1 AND provider = 'agent-filter-test'`, runtimeID)
+	})
+
+	insertHourly := func(agent string, tokens int64) {
+		t.Helper()
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO task_usage_hourly (
+				bucket_hour, workspace_id, runtime_id, agent_id, project_id,
+				provider, model, input_tokens, output_tokens,
+				cache_read_tokens, cache_write_tokens, task_count, event_count
+			)
+			VALUES (
+				date_trunc('hour', now()), $1, $2, $3, NULL,
+				'agent-filter-test', 'agent-filter-model', $4, 0, 0, 0, 1, 1
+			)
+			ON CONFLICT ON CONSTRAINT uq_task_usage_hourly_key DO UPDATE
+				SET input_tokens = EXCLUDED.input_tokens
+		`, testWorkspaceID, runtimeID, agent, tokens); err != nil {
+			t.Fatalf("insert hourly: %v", err)
+		}
+	}
+	insertHourly(agentID, 111)
+	insertHourly(otherAgentID, 999)
+
+	w := httptest.NewRecorder()
+	testHandler.GetDashboardUsageByAgent(w, newRequest("GET", "/api/dashboard/usage/by-agent?days=1&agent_id="+agentID, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("by-agent filter: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var rows []DashboardUsageByAgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	var total int64
+	for _, row := range rows {
+		if row.Model == "agent-filter-model" {
+			if row.AgentID != agentID {
+				t.Fatalf("filtered response leaked agent %s row: %+v", row.AgentID, row)
+			}
+			total += row.InputTokens
+		}
+	}
+	if total != 111 {
+		t.Fatalf("filtered agent-filter-model total = %d, want 111", total)
+	}
+}
+
 // TestDashboardUsageDailyBucketsByViewerTimezone proves the `?tz=` query
 // param drives the calendar-day boundary: the same UTC instant lands under
 // a different `date` for a UTC viewer vs an America/Los_Angeles viewer.

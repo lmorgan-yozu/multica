@@ -2267,26 +2267,176 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// GetIssueUsage returns aggregated token usage for all tasks belonging to an issue.
+type IssueUsageTaskBreakdownResponse struct {
+	TaskID           string  `json:"task_id"`
+	SessionID        *string `json:"session_id,omitempty"`
+	AgentID          string  `json:"agent_id"`
+	Status           string  `json:"status"`
+	Provider         string  `json:"provider,omitempty"`
+	Model            string  `json:"model,omitempty"`
+	InputTokens      int64   `json:"input_tokens"`
+	OutputTokens     int64   `json:"output_tokens"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	UsageStatus      string  `json:"usage_status"`
+}
+
+type IssueUsageAgentBreakdownResponse struct {
+	AgentID               string `json:"agent_id"`
+	Provider              string `json:"provider,omitempty"`
+	Model                 string `json:"model,omitempty"`
+	InputTokens           int64  `json:"input_tokens"`
+	OutputTokens          int64  `json:"output_tokens"`
+	CacheReadTokens       int64  `json:"cache_read_tokens"`
+	CacheWriteTokens      int64  `json:"cache_write_tokens"`
+	TaskCount             int32  `json:"task_count"`
+	UsageTaskCount        int32  `json:"usage_task_count"`
+	MissingUsageTaskCount int32  `json:"missing_usage_task_count"`
+	UsageStatus           string `json:"usage_status"`
+}
+
+type IssueUsageResponse struct {
+	TotalInputTokens      int64                              `json:"total_input_tokens"`
+	TotalOutputTokens     int64                              `json:"total_output_tokens"`
+	TotalCacheReadTokens  int64                              `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int64                              `json:"total_cache_write_tokens"`
+	TaskCount             int32                              `json:"task_count"`
+	UsageTaskCount        int32                              `json:"usage_task_count"`
+	MissingUsageTaskCount int32                              `json:"missing_usage_task_count"`
+	UsageStatus           string                             `json:"usage_status"`
+	TaskBreakdown         []IssueUsageTaskBreakdownResponse  `json:"task_breakdown"`
+	AgentBreakdown        []IssueUsageAgentBreakdownResponse `json:"agent_breakdown"`
+}
+
+func usageStatus(taskCount, missingUsageTaskCount int32) string {
+	switch {
+	case taskCount == 0:
+		return "empty"
+	case missingUsageTaskCount == taskCount:
+		return "missing"
+	case missingUsageTaskCount > 0:
+		return "partial"
+	default:
+		return "complete"
+	}
+}
+
+func parseOptionalUUIDQueryParam(w http.ResponseWriter, r *http.Request, name string) (pgtype.UUID, bool) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return pgtype.UUID{}, true
+	}
+	u, ok := parseUUIDOrBadRequest(w, raw, name)
+	if !ok {
+		return pgtype.UUID{}, false
+	}
+	return u, true
+}
+
+func parseOptionalTimeQueryParam(w http.ResponseWriter, r *http.Request, name string) (pgtype.Timestamptz, bool) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return pgtype.Timestamptz{}, true
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid "+name)
+		return pgtype.Timestamptz{}, false
+	}
+	return pgtype.Timestamptz{Time: t, Valid: true}, true
+}
+
+// GetIssueUsage returns token usage for all tasks belonging to an issue,
+// including per-task and per-agent breakdowns. Tasks without usage rows are
+// reported explicitly instead of being collapsed into zero-token totals.
 func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
 	if !ok {
 		return
 	}
+	agentID, ok := parseOptionalUUIDQueryParam(w, r, "agent_id")
+	if !ok {
+		return
+	}
+	since, ok := parseOptionalTimeQueryParam(w, r, "since")
+	if !ok {
+		return
+	}
+	until, ok := parseOptionalTimeQueryParam(w, r, "until")
+	if !ok {
+		return
+	}
 
-	row, err := h.Queries.GetIssueUsageSummary(r.Context(), issue.ID)
+	params := db.GetIssueUsageSummaryParams{
+		IssueID: issue.ID,
+		AgentID: agentID,
+		Since:   since,
+		Until:   until,
+	}
+
+	row, err := h.Queries.GetIssueUsageSummary(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get issue usage")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"total_input_tokens":       row.TotalInputTokens,
-		"total_output_tokens":      row.TotalOutputTokens,
-		"total_cache_read_tokens":  row.TotalCacheReadTokens,
-		"total_cache_write_tokens": row.TotalCacheWriteTokens,
-		"task_count":               row.TaskCount,
+	taskRows, err := h.Queries.ListIssueUsageByTask(r.Context(), db.ListIssueUsageByTaskParams(params))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list issue usage by task")
+		return
+	}
+	agentRows, err := h.Queries.ListIssueUsageByAgent(r.Context(), db.ListIssueUsageByAgentParams(params))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list issue usage by agent")
+		return
+	}
+
+	taskBreakdown := make([]IssueUsageTaskBreakdownResponse, len(taskRows))
+	for i, taskRow := range taskRows {
+		taskBreakdown[i] = IssueUsageTaskBreakdownResponse{
+			TaskID:           uuidToString(taskRow.TaskID),
+			SessionID:        textToPtr(taskRow.SessionID),
+			AgentID:          uuidToString(taskRow.AgentID),
+			Status:           taskRow.Status,
+			Provider:         taskRow.Provider.String,
+			Model:            taskRow.Model.String,
+			InputTokens:      taskRow.InputTokens,
+			OutputTokens:     taskRow.OutputTokens,
+			CacheReadTokens:  taskRow.CacheReadTokens,
+			CacheWriteTokens: taskRow.CacheWriteTokens,
+			UsageStatus:      taskRow.UsageStatus,
+		}
+	}
+
+	agentBreakdown := make([]IssueUsageAgentBreakdownResponse, len(agentRows))
+	for i, agentRow := range agentRows {
+		agentBreakdown[i] = IssueUsageAgentBreakdownResponse{
+			AgentID:               uuidToString(agentRow.AgentID),
+			Provider:              agentRow.Provider.String,
+			Model:                 agentRow.Model.String,
+			InputTokens:           agentRow.InputTokens,
+			OutputTokens:          agentRow.OutputTokens,
+			CacheReadTokens:       agentRow.CacheReadTokens,
+			CacheWriteTokens:      agentRow.CacheWriteTokens,
+			TaskCount:             agentRow.TaskCount,
+			UsageTaskCount:        agentRow.UsageTaskCount,
+			MissingUsageTaskCount: agentRow.MissingUsageTaskCount,
+			UsageStatus:           usageStatus(agentRow.TaskCount, agentRow.MissingUsageTaskCount),
+		}
+	}
+
+	writeJSON(w, http.StatusOK, IssueUsageResponse{
+		TotalInputTokens:      row.TotalInputTokens,
+		TotalOutputTokens:     row.TotalOutputTokens,
+		TotalCacheReadTokens:  row.TotalCacheReadTokens,
+		TotalCacheWriteTokens: row.TotalCacheWriteTokens,
+		TaskCount:             row.TaskCount,
+		UsageTaskCount:        row.UsageTaskCount,
+		MissingUsageTaskCount: row.MissingUsageTaskCount,
+		UsageStatus:           usageStatus(row.TaskCount, row.MissingUsageTaskCount),
+		TaskBreakdown:         taskBreakdown,
+		AgentBreakdown:        agentBreakdown,
 	})
 }
 

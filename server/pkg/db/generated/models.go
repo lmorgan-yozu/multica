@@ -408,6 +408,31 @@ type IssueDependency struct {
 	Type             string      `json:"type"`
 }
 
+type IssueHandoff struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	TaskID           pgtype.UUID        `json:"task_id"`
+	AuthorType       pgtype.Text        `json:"author_type"`
+	AuthorID         pgtype.UUID        `json:"author_id"`
+	NextAssigneeType pgtype.Text        `json:"next_assignee_type"`
+	NextAssigneeID   pgtype.UUID        `json:"next_assignee_id"`
+	WorkflowRunID    pgtype.UUID        `json:"workflow_run_id"`
+	WorkflowStepID   pgtype.UUID        `json:"workflow_step_id"`
+	WorkCompleted    string             `json:"work_completed"`
+	WorkRemaining    string             `json:"work_remaining"`
+	DecisionsMade    string             `json:"decisions_made"`
+	Uncertainties    string             `json:"uncertainties"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type IssueHandoffFollowUpIssue struct {
+	IssueHandoffID pgtype.UUID        `json:"issue_handoff_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type IssueLabel struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

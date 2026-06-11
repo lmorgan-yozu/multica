@@ -824,17 +824,24 @@ func TestBuildIssueFlowScanRows(t *testing.T) {
 		{"id": "stale", "identifier": "ADA-2", "title": "Stale", "assignee_type": "agent", "assignee_id": "agent-b", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339)},
 		{"id": "ambiguous", "identifier": "ADA-3", "title": "Ambiguous", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339)},
 		{"id": "waiting", "identifier": "ADA-4", "title": "Waiting", "assignee_type": "agent", "assignee_id": "agent-b", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339), "metadata": map[string]any{"waiting_on": "provider reset"}},
+		{"id": "offline", "identifier": "ADA-5", "title": "Offline", "assignee_type": "agent", "assignee_id": "agent-c", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339)},
+		{"id": "capped", "identifier": "ADA-6", "title": "Capped", "assignee_type": "agent", "assignee_id": "agent-d", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339)},
 	}
 	tasks := map[string][]map[string]any{
 		"active": {{"id": "task-1", "agent_id": "agent-a", "status": "queued"}},
+		"other":  {{"id": "task-2", "agent_id": "agent-d", "status": "running"}},
 	}
 	agents := map[string]flowScanAgent{
 		"agent-a": {ID: "agent-a", Name: "Agent A", RuntimeID: "runtime-a", MaxConcurrentTasks: 2},
 		"agent-b": {ID: "agent-b", Name: "Agent B", RuntimeID: "runtime-b", MaxConcurrentTasks: 2},
+		"agent-c": {ID: "agent-c", Name: "Agent C", RuntimeID: "runtime-c", MaxConcurrentTasks: 2},
+		"agent-d": {ID: "agent-d", Name: "Agent D", RuntimeID: "runtime-d", MaxConcurrentTasks: 1},
 	}
 	runtimes := map[string]flowScanRuntime{
 		"runtime-a": {ID: "runtime-a", Status: "online"},
 		"runtime-b": {ID: "runtime-b", Status: "online"},
+		"runtime-c": {ID: "runtime-c", Status: "offline"},
+		"runtime-d": {ID: "runtime-d", Status: "online"},
 	}
 
 	rows := buildIssueFlowScanRows(issues, tasks, agents, runtimes, now, 30*time.Minute)
@@ -849,6 +856,12 @@ func TestBuildIssueFlowScanRows(t *testing.T) {
 	}
 	if rows[3].State != "waiting" || rows[3].Recommendation != "leave_alone" {
 		t.Fatalf("waiting row = %#v, want waiting/leave_alone", rows[3])
+	}
+	if rows[4].State != "no_capacity" || rows[4].Recommendation != "record_capacity" || rows[4].Reason != "assignee runtime is not online" {
+		t.Fatalf("offline row = %#v, want no_capacity/record_capacity for offline runtime", rows[4])
+	}
+	if rows[5].State != "no_capacity" || rows[5].Recommendation != "record_capacity" || rows[5].Reason != "assignee is at configured task capacity" {
+		t.Fatalf("capped row = %#v, want no_capacity/record_capacity for task cap", rows[5])
 	}
 }
 

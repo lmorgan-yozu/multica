@@ -26,7 +26,7 @@ Engineers and QA are additionally bound to the `tdd` skill.
 | Code Reviewer | claude-fable-5 (Claude) | Primary quality gate; deliberately a different provider from the implementing engineers |
 | QA Engineer | gpt-5.5 (Codex) | Verification against acceptance criteria; release-readiness casting vote |
 | Security Reviewer | claude-fable-5 (Claude) | Auth, tenant isolation, secrets, untrusted input; verdict is a veto |
-| DevOps Engineer | gpt-5.5 (Codex) | Builds and deploys to staging; prod is always human-gated |
+| DevOps Engineer | gpt-5.5 (Codex) | Builds and deploys to staging; prod deploy with verified backup |
 | Technical Writer | pro (Gemini) | Keeps fork docs and runbooks accurate |
 
 Squad: **Ada Platform Team**, led by the Delivery Lead. Squad-routed work
@@ -48,10 +48,12 @@ a Claude agent, mirroring the practice described in the Arcus Q&R.
 
 ## Human gates
 
-- Top-level issues need human sign-off before build starts (Product Owner
-  and Tech Lead prepare; the human approves).
-- Production deploys and destructive operations are never agent-executed.
-- Scope, cost, client-facing, and IP matters always escalate to the human.
+- The review chain is the quality gate, not the human (no per-issue human sign-off).
+- For any risky move (schema migration, deploy, data change, irreversible operation) take a backup first, verify the backup, and write the rollback plan on the issue before acting.
+- Escalate to the human ONLY for:
+  - Anything that would touch the public Multica project, publish Yozu IP, or send anything client-facing outside this instance.
+  - A destructive operation where no workable backup or rollback exists.
+  - Spending real money or credentials/access you do not already have.
 
 ## Lessons carried over from Arcus FM
 
@@ -59,12 +61,6 @@ a Claude agent, mirroring the practice described in the Arcus Q&R.
 - Explicit per-role review protocols ("when done, set X and reassign Y")
   are what make hand-offs reliable — never leave finished work unassigned.
 - Casting-vote assignments per domain (technical → Tech Lead, product →
-  PO, ship/no-ship → QA, security → veto) resolve deadlocks without humans.
-- Backlog status = parked (no triggers); todo = an assigned agent fires.
-  Use backlog for staged work, promote deliberately.
-- Autopilots work as orchestration ticks (wave-manager pattern): cap
-  concurrent chains, never re-trigger in-flight work, report to one issue.
-��
   PO, ship/no-ship → QA, security → veto) resolve deadlocks without humans.
 - Backlog status = parked (no triggers); todo = an assigned agent fires.
   Use backlog for staged work, promote deliberately.

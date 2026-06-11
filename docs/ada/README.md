@@ -15,10 +15,10 @@ Hard rules for this repository:
   PRs against, the public Multica project (`github.com/multica-ai/multica`
   or any `multica-ai` remote).
 - Feature branch + review flow; `main` moves only after review.
-The deployed instance (agents.tauntondene.io) runs this code — the
-platform you are modifying is the platform the team runs on. Migrations
-and deploys are production changes; staging first, then prod (with a
-verified backup and written rollback plan).
+- The deployed instance (agents.tauntondene.io) runs this code — the
+  platform you are modifying is the platform the team runs on. Migrations
+  and deploys are production changes; staging first, then prod (with a
+  verified backup and written rollback plan).
 
 Contents:
 

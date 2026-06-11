@@ -45,3 +45,31 @@ make check            # Full verification pipeline
 ```
 
 See CLAUDE.md for the complete command reference.
+
+## Multica Host Safety Rules
+
+Provenance: copied verbatim from `/home/lmorgan/docker/multica/POSTMORTEM-2026-06-11.md` on 2026-06-11.
+
+You are running *inside* the system you are editing. The production containers are your own control plane — if you take down `multica-postgres-1`, every agent task (including yours) loses the daemon API mid-flight.
+
+1. **Never run `docker compose` from a multica repo checkout on this host.** Not `up`, not `down`, not `restart`, not `rm` — and not Makefile/package.json targets that wrap them. The repo's compose project is named `multica`, which collides with production. Any compose command in your checkout can adopt, recreate, or remove the live prod containers.
+
+2. **Need a database for tests?** Start a throwaway container with a unique name and a unique high host port, e.g.:
+   ```sh
+   docker run -d --name <task-id>-pg -p 127.0.0.1:55<nnn>:5432 \
+     -e POSTGRES_PASSWORD=test pgvector/pgvector:pg17
+   ```
+   (This is the existing `ada23-test-pg` / `ada52-merge-pg` pattern.) Remove it when your task finishes.
+
+3. **Never bind these host ports:** 5432 and 3000 (freightsoft), 5437/8080/3030 (multica prod), 8081/3031 (multica staging), 9898 (backrest). Always pick a fresh 55xxx port and bind to 127.0.0.1.
+
+4. **Hands off these containers:** `multica-postgres-1`, `multica-backend-1`, `multica-frontend-1`, and the `multica-staging-*` set. Deployments happen only via the documented staging→prod procedure driven from `/home/lmorgan/docker/multica`, never by ad-hoc compose/docker commands against running containers.
+
+5. **When syncing upstream, audit for config-affecting changes** (new/renamed env vars, port or volume changes — e.g. upstream #1773) and update `/home/lmorgan/docker/multica/.env` and compose accordingly *before* a rebuilt image reaches prod.
+
+6. **If prod postgres ever goes missing or stuck in `Created`:**
+   ```sh
+   docker rm multica-postgres-1
+   cd /home/lmorgan/docker/multica && docker compose up -d postgres
+   ```
+   Data is safe in `./data/db`; the compose file there is the source of truth.

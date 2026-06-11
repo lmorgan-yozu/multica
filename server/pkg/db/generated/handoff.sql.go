@@ -166,6 +166,126 @@ func (q *Queries) GetIssueHandoffInWorkspace(ctx context.Context, arg GetIssueHa
 	return i, err
 }
 
+const getLatestIssueHandoff = `-- name: GetLatestIssueHandoff :one
+SELECT id, workspace_id, issue_id, task_id, author_type, author_id, next_assignee_type, next_assignee_id, workflow_run_id, workflow_step_id, work_completed, work_remaining, decisions_made, uncertainties, created_at, updated_at FROM issue_handoff
+WHERE workspace_id = $1 AND issue_id = $2
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLatestIssueHandoffParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+// The single most recent handoff for an issue — the live handoff state used
+// when injecting structured context into a claimed agent task. Deliberately
+// LIMIT 1: prompts get the latest relevant handoff, not the full history
+// (summarisation of history is later ADA-6 memory work).
+func (q *Queries) GetLatestIssueHandoff(ctx context.Context, arg GetLatestIssueHandoffParams) (IssueHandoff, error) {
+	row := q.db.QueryRow(ctx, getLatestIssueHandoff, arg.WorkspaceID, arg.IssueID)
+	var i IssueHandoff
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.TaskID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.NextAssigneeType,
+		&i.NextAssigneeID,
+		&i.WorkflowRunID,
+		&i.WorkflowStepID,
+		&i.WorkCompleted,
+		&i.WorkRemaining,
+		&i.DecisionsMade,
+		&i.Uncertainties,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLatestTaskIDForIssueAndAgent = `-- name: GetLatestTaskIDForIssueAndAgent :one
+SELECT id FROM agent_task_queue
+WHERE issue_id = $1 AND agent_id = $2
+ORDER BY COALESCE(started_at, dispatched_at, created_at) DESC, created_at DESC
+LIMIT 1
+`
+
+type GetLatestTaskIDForIssueAndAgentParams struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	AgentID pgtype.UUID `json:"agent_id"`
+}
+
+// Best-effort task linkage for workflow-created handoff records: the most
+// recent task this agent ran (or is running) on the issue. Any status counts
+// — at advance time the outgoing agent's task is usually still 'running'
+// because the status change that triggers advancement happens mid-task.
+func (q *Queries) GetLatestTaskIDForIssueAndAgent(ctx context.Context, arg GetLatestTaskIDForIssueAndAgentParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getLatestTaskIDForIssueAndAgent, arg.IssueID, arg.AgentID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const linkIssueHandoffToWorkflow = `-- name: LinkIssueHandoffToWorkflow :one
+UPDATE issue_handoff
+SET workflow_run_id = $1,
+    workflow_step_id = $2,
+    next_assignee_type = $3,
+    next_assignee_id = $4,
+    task_id = COALESCE(task_id, $5),
+    updated_at = now()
+WHERE id = $6
+RETURNING id, workspace_id, issue_id, task_id, author_type, author_id, next_assignee_type, next_assignee_id, workflow_run_id, workflow_step_id, work_completed, work_remaining, decisions_made, uncertainties, created_at, updated_at
+`
+
+type LinkIssueHandoffToWorkflowParams struct {
+	WorkflowRunID    pgtype.UUID `json:"workflow_run_id"`
+	WorkflowStepID   pgtype.UUID `json:"workflow_step_id"`
+	NextAssigneeType pgtype.Text `json:"next_assignee_type"`
+	NextAssigneeID   pgtype.UUID `json:"next_assignee_id"`
+	TaskID           pgtype.UUID `json:"task_id"`
+	ID               pgtype.UUID `json:"id"`
+}
+
+// Adopts an agent-authored handoff as the workflow advancement record:
+// stamps the run/step linkage and the workflow's routing decision (next
+// assignee) onto it instead of inserting a thin duplicate row that would
+// shadow the agent's richer record as "latest". task_id is only filled in
+// when the record doesn't already carry one.
+func (q *Queries) LinkIssueHandoffToWorkflow(ctx context.Context, arg LinkIssueHandoffToWorkflowParams) (IssueHandoff, error) {
+	row := q.db.QueryRow(ctx, linkIssueHandoffToWorkflow,
+		arg.WorkflowRunID,
+		arg.WorkflowStepID,
+		arg.NextAssigneeType,
+		arg.NextAssigneeID,
+		arg.TaskID,
+		arg.ID,
+	)
+	var i IssueHandoff
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.TaskID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.NextAssigneeType,
+		&i.NextAssigneeID,
+		&i.WorkflowRunID,
+		&i.WorkflowStepID,
+		&i.WorkCompleted,
+		&i.WorkRemaining,
+		&i.DecisionsMade,
+		&i.Uncertainties,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listIssueHandoffFollowUpIssues = `-- name: ListIssueHandoffFollowUpIssues :many
 SELECT issue_handoff_id, issue_id
 FROM issue_handoff_follow_up_issue

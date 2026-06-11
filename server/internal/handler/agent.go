@@ -230,6 +230,13 @@ type AgentTaskResponse struct {
 	RequestingUserName               string `json:"requesting_user_name,omitempty"`
 	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
 	Kind                             string `json:"kind"` // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	// LatestHandoff is the most recent structured handoff record for the
+	// task's issue (see migration 117_issue_handoff), resolved at claim time
+	// so the daemon can inject a concise "## Latest handoff" block into the
+	// agent brief without the agent trawling comments. Nil when the issue has
+	// no handoffs (the additive default) or the task has no issue; old
+	// daemons ignore the field entirely.
+	LatestHandoff *TaskHandoffData `json:"latest_handoff,omitempty"`
 	// AuthToken is the task-scoped `mat_` token the daemon must inject as
 	// MULTICA_TOKEN in the agent process environment. The server binds it to
 	// this (agent_id, task_id) pair at claim time and treats any request

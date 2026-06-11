@@ -1175,7 +1175,7 @@ func TestGetIssueUsage_ReturnsBreakdownsAndMissingUsage(t *testing.T) {
 				agent_id, runtime_id, issue_id, status, session_id,
 				started_at, completed_at, created_at
 			)
-			VALUES ($1, $2, $3, 'completed', $4, $5, $5 + interval '1 minute', $5)
+			VALUES ($1, $2, $3, 'completed', $4, $5::timestamptz, $5::timestamptz + interval '1 minute', $5::timestamptz)
 			RETURNING id
 		`, agent, runtimeID, issue, session, createdAt).Scan(&taskID); err != nil {
 			t.Fatalf("setup: create task: %v", err)

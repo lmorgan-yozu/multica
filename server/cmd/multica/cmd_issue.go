@@ -138,6 +138,12 @@ var issueStatusCmd = &cobra.Command{
 	RunE: runIssueStatus,
 }
 
+var issueFlowScanCmd = &cobra.Command{
+	Use:   "flow-scan",
+	Short: "Scan in-progress issues for active work, stale work, and agent capacity",
+	RunE:  runIssueFlowScan,
+}
+
 // Comment subcommands.
 
 var issueCommentCmd = &cobra.Command{
@@ -246,6 +252,7 @@ func init() {
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
+	issueCmd.AddCommand(issueFlowScanCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
 	issueCmd.AddCommand(issueRunsCmd)
@@ -314,6 +321,12 @@ func init() {
 
 	// issue status
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// issue flow-scan
+	issueFlowScanCmd.Flags().String("output", "json", "Output format: table or json")
+	issueFlowScanCmd.Flags().String("project", "", "Project ID")
+	issueFlowScanCmd.Flags().String("stale-window", "30m", "How long an in-progress issue may have no active task/update before it is stale")
+	issueFlowScanCmd.Flags().Int("limit", 200, "Maximum number of in-progress issues to scan")
 
 	// issue assign
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
@@ -502,6 +515,291 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+type flowScanAgent struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	RuntimeID          string `json:"runtime_id"`
+	MaxConcurrentTasks int    `json:"max_concurrent_tasks"`
+}
+
+type flowScanRuntime struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
+type flowScanIssue struct {
+	Key              string   `json:"key"`
+	ID               string   `json:"id"`
+	Title            string   `json:"title"`
+	AssigneeID       string   `json:"assignee_id,omitempty"`
+	AssigneeName     string   `json:"assignee_name,omitempty"`
+	UpdatedAt        string   `json:"updated_at,omitempty"`
+	ActiveTaskIDs    []string `json:"active_task_ids"`
+	ActiveTaskCount  int      `json:"active_task_count"`
+	AssigneeRunning  int      `json:"assignee_running"`
+	AssigneeCapacity int      `json:"assignee_capacity"`
+	RuntimeStatus    string   `json:"runtime_status,omitempty"`
+	State            string   `json:"state"`
+	Reason           string   `json:"reason"`
+	Recommendation   string   `json:"recommendation"`
+}
+
+func runIssueFlowScan(cmd *cobra.Command, _ []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if client.WorkspaceID == "" {
+		if _, err := requireWorkspaceID(cmd); err != nil {
+			return err
+		}
+	}
+
+	staleWindowRaw, _ := cmd.Flags().GetString("stale-window")
+	staleWindow, err := time.ParseDuration(staleWindowRaw)
+	if err != nil {
+		return fmt.Errorf("parse --stale-window: %w", err)
+	}
+
+	params := url.Values{}
+	params.Set("workspace_id", client.WorkspaceID)
+	params.Set("status", "in_progress")
+	if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	if projectID, _ := cmd.Flags().GetString("project"); projectID != "" {
+		params.Set("project_id", projectID)
+	}
+
+	var issueResp map[string]any
+	if err := client.GetJSON(ctx, "/api/issues?"+params.Encode(), &issueResp); err != nil {
+		return fmt.Errorf("list in-progress issues: %w", err)
+	}
+	issues := normalizeMapList(issueResp["issues"])
+
+	tasksByIssue := make(map[string][]map[string]any, len(issues))
+	for _, issue := range issues {
+		issueID := strVal(issue, "id")
+		if issueID == "" {
+			continue
+		}
+		var runs []map[string]any
+		if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueID)+"/task-runs", &runs); err != nil {
+			return fmt.Errorf("list task runs for %s: %w", issueDisplayKey(issue), err)
+		}
+		tasksByIssue[issueID] = runs
+	}
+
+	agents, err := fetchFlowScanAgents(ctx, client)
+	if err != nil {
+		return err
+	}
+	runtimes, err := fetchFlowScanRuntimes(ctx, client)
+	if err != nil {
+		return err
+	}
+
+	rows := buildIssueFlowScanRows(issues, tasksByIssue, agents, runtimes, time.Now().UTC(), staleWindow)
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, map[string]any{
+			"stale_window": staleWindow.String(),
+			"issues":       rows,
+		})
+	}
+	tableRows := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		tableRows = append(tableRows, []string{
+			row.Key,
+			row.State,
+			row.AssigneeName,
+			fmt.Sprintf("%d/%d", row.AssigneeRunning, row.AssigneeCapacity),
+			row.RuntimeStatus,
+			row.Recommendation,
+			row.Reason,
+		})
+	}
+	cli.PrintTable(os.Stdout, []string{"KEY", "STATE", "ASSIGNEE", "CAPACITY", "RUNTIME", "RECOMMENDATION", "REASON"}, tableRows)
+	return nil
+}
+
+func normalizeMapList(raw any) []map[string]any {
+	items, _ := raw.([]any)
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if m, ok := item.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func fetchFlowScanAgents(ctx context.Context, client *cli.APIClient) (map[string]flowScanAgent, error) {
+	var raw []map[string]any
+	if err := client.GetJSON(ctx, "/api/agents", &raw); err != nil {
+		return nil, fmt.Errorf("list agents: %w", err)
+	}
+	agents := make(map[string]flowScanAgent, len(raw))
+	for _, item := range raw {
+		id := strVal(item, "id")
+		if id == "" {
+			continue
+		}
+		max := int(floatVal(item, "max_concurrent_tasks"))
+		if max <= 0 {
+			max = 1
+		}
+		agents[id] = flowScanAgent{
+			ID:                 id,
+			Name:               strVal(item, "name"),
+			RuntimeID:          strVal(item, "runtime_id"),
+			MaxConcurrentTasks: max,
+		}
+	}
+	return agents, nil
+}
+
+func fetchFlowScanRuntimes(ctx context.Context, client *cli.APIClient) (map[string]flowScanRuntime, error) {
+	var raw []map[string]any
+	if err := client.GetJSON(ctx, "/api/runtimes", &raw); err != nil {
+		return nil, fmt.Errorf("list runtimes: %w", err)
+	}
+	runtimes := make(map[string]flowScanRuntime, len(raw))
+	for _, item := range raw {
+		id := strVal(item, "id")
+		if id == "" {
+			continue
+		}
+		runtimes[id] = flowScanRuntime{ID: id, Status: strVal(item, "status")}
+	}
+	return runtimes, nil
+}
+
+func buildIssueFlowScanRows(issues []map[string]any, tasksByIssue map[string][]map[string]any, agents map[string]flowScanAgent, runtimes map[string]flowScanRuntime, now time.Time, staleWindow time.Duration) []flowScanIssue {
+	runningByAgent := map[string]int{}
+	for _, runs := range tasksByIssue {
+		for _, task := range runs {
+			if strVal(task, "status") == "running" {
+				runningByAgent[strVal(task, "agent_id")]++
+			}
+		}
+	}
+
+	rows := make([]flowScanIssue, 0, len(issues))
+	for _, issue := range issues {
+		issueID := strVal(issue, "id")
+		assigneeID := strVal(issue, "assignee_id")
+		agent, agentOK := agents[assigneeID]
+		rt := runtimes[agent.RuntimeID]
+		activeTaskIDs := activeTaskIDsForAssignee(tasksByIssue[issueID], assigneeID)
+
+		row := flowScanIssue{
+			Key:             issueDisplayKey(issue),
+			ID:              issueID,
+			Title:           strVal(issue, "title"),
+			AssigneeID:      assigneeID,
+			AssigneeName:    agent.Name,
+			UpdatedAt:       strVal(issue, "updated_at"),
+			ActiveTaskIDs:   activeTaskIDs,
+			ActiveTaskCount: len(activeTaskIDs),
+			AssigneeRunning: runningByAgent[assigneeID],
+			RuntimeStatus:   rt.Status,
+			State:           "stale_capacity_available",
+			Reason:          "no active task and no recent issue update inside stale window",
+			Recommendation:  "intervene",
+		}
+		if agentOK {
+			row.AssigneeCapacity = agent.MaxConcurrentTasks
+		}
+
+		switch {
+		case len(activeTaskIDs) > 0:
+			row.State = "active"
+			row.Reason = "queued/dispatched/running task already exists for intended assignee"
+			row.Recommendation = "leave_alone"
+		case issueHasWaitingMetadata(issue):
+			row.State = "waiting"
+			row.Reason = "issue metadata records an intentional wait"
+			row.Recommendation = "leave_alone"
+		case assigneeID == "" || strVal(issue, "assignee_type") != "agent" || !agentOK:
+			row.State = "ambiguous_routing"
+			row.Reason = "no clear agent assignee to route"
+			row.Recommendation = "record_ambiguity"
+		case issueUpdatedWithin(issue, now, staleWindow):
+			row.State = "recent_update"
+			row.Reason = "issue updated inside stale window"
+			row.Recommendation = "leave_alone"
+		case rt.Status != "online":
+			row.State = "no_capacity"
+			row.Reason = "assignee runtime is not online"
+			row.Recommendation = "record_capacity"
+		case row.AssigneeRunning >= row.AssigneeCapacity:
+			row.State = "no_capacity"
+			row.Reason = "assignee is at configured task capacity"
+			row.Recommendation = "record_capacity"
+		}
+
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func activeTaskIDsForAssignee(tasks []map[string]any, assigneeID string) []string {
+	ids := []string{}
+	for _, task := range tasks {
+		if assigneeID != "" && strVal(task, "agent_id") != assigneeID {
+			continue
+		}
+		switch strVal(task, "status") {
+		case "queued", "dispatched", "running", "waiting_local_directory":
+			ids = append(ids, strVal(task, "id"))
+		}
+	}
+	return ids
+}
+
+func issueHasWaitingMetadata(issue map[string]any) bool {
+	metadata, ok := issue["metadata"].(map[string]any)
+	if !ok {
+		return false
+	}
+	for _, key := range []string{"waiting_on", "blocked_reason"} {
+		if value, exists := metadata[key]; exists && fmt.Sprint(value) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func issueUpdatedWithin(issue map[string]any, now time.Time, window time.Duration) bool {
+	updatedAt := strVal(issue, "updated_at")
+	if updatedAt == "" {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, updatedAt)
+	if err != nil {
+		return false
+	}
+	return now.Sub(t) <= window
+}
+
+func floatVal(m map[string]any, key string) float64 {
+	switch v := m[key].(type) {
+	case float64:
+		return v
+	case int:
+		return float64(v)
+	case json.Number:
+		f, _ := v.Float64()
+		return f
+	default:
+		return 0
+	}
 }
 
 func runIssuePullRequests(cmd *cobra.Command, args []string) error {

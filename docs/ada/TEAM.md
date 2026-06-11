@@ -46,12 +46,34 @@ Security Reviewer: on referral, anywhere in the chain; their no is final.
 Cross-provider review is deliberate: Codex-implemented work is reviewed by
 a Claude agent, mirroring the practice described in the Arcus Q&R.
 
-## Human gates
+## Human gates: the DEFAULT Ada interaction model
 
+This is the standard model that applies to all client engagements and is the
+model carried over when exporting workspace templates (ADA-30):
+
+- Humans set boundaries and standards.
 - Top-level issues need human sign-off before build starts (Product Owner
   and Tech Lead prepare; the human approves).
-- Production deploys and destructive operations are never agent-executed.
-- Scope, cost, client-facing, and IP matters always escalate to the human.
+- Humans review at defined workflow points.
+- Production deploys, and scope, cost, or client-facing calls are always
+  human-owned, per the vision documents.
+
+### The ADA-1 Exception (Ada Bootstrapping only)
+
+This specific project (Ada Bootstrapping, platform build) runs autonomously
+under the ADA-1 exception, granted for time pressure, low risk, and no
+client exposure. It does **not** extend to any other project, workspace,
+or template export (ADA-30 exports always carry the default model).
+
+Under this exception:
+- Agents have standing build authorisation without prior human sign-off.
+- The agent review chain acts as the primary quality gate.
+- Risky moves rely on strict backup and rollback discipline.
+
+**Mandatory Escalation List (applies even under the exception):**
+- Any public Multica or IP exposure.
+- Destructive operations without a workable backup/rollback path.
+- New spend or credentials.
 
 ## Lessons carried over from Arcus FM
 

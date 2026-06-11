@@ -42,6 +42,9 @@ affordances and can trail.
   (the workflows feature's "strictly opt-in, bounded blast radius" pattern
   is the template).
 - The live instance runs this code; migrations must be reversible and
-  staging-tested. Prod deploys are human-gated.
+  staging-tested. While the DEFAULT model demands human-gated prod deploys
+  (and this applies to all ADA-30 template exports), this specific workspace
+  operates under the ADA-1 exception: standing build authorisation and strict
+  backup+rollback discipline for risky moves.
 - Human override must always exist for any enforcement feature (audited
   owner/admin force-transition).

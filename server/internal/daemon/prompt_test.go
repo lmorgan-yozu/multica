@@ -511,3 +511,123 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 		t.Errorf("resumed/no-delta prompt must not use the cold-start forced-read wording, got:\n%s", out)
 	}
 }
+
+// TestBuildPromptDirectIncludesLatestHandoff verifies that an
+// assignment/workflow-triggered (direct) task prompt renders the latest
+// structured handoff so the agent starts from the previous agent's state
+// instead of trawling comments (ADA-23).
+func TestBuildPromptDirectIncludesLatestHandoff(t *testing.T) {
+	out := BuildPrompt(Task{
+		IssueID: "issue-handoff-1",
+		LatestHandoff: &HandoffData{
+			ID:               "h-1",
+			CreatedAt:        "2026-06-11T17:00:00Z",
+			AuthorType:       "agent",
+			AuthorName:       "Backend Engineer",
+			NextAssigneeType: "agent",
+			NextAssigneeName: "Code Reviewer",
+			WorkCompleted:    "Implemented the handoff API.",
+			WorkRemaining:    "Review the diff against main.",
+			DecisionsMade:    "Stored follow-ups in a join table.",
+			Uncertainties:    "Duplicate follow-up ids in create response.",
+		},
+	}, "claude")
+
+	for _, s := range []string{
+		"## Latest handoff",
+		"agent \"Backend Engineer\"",
+		"agent \"Code Reviewer\"",
+		"2026-06-11T17:00:00Z",
+		"Work completed:",
+		"Implemented the handoff API.",
+		"Work remaining:",
+		"Review the diff against main.",
+		"Decisions made:",
+		"Stored follow-ups in a join table.",
+		"Uncertainties:",
+		"Duplicate follow-up ids in create response.",
+		// Handoffs are a snapshot, not gospel — the agent must still check
+		// for anything newer on the issue.
+		"newer than this handoff",
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("direct BuildPrompt missing %q\n--- output ---\n%s", s, out)
+		}
+	}
+}
+
+// TestBuildPromptDirectNoHandoffUnchanged locks in the additive guarantee:
+// with no handoff on the claim, the direct prompt must not mention handoffs
+// at all.
+func TestBuildPromptDirectNoHandoffUnchanged(t *testing.T) {
+	out := BuildPrompt(Task{IssueID: "issue-plain-2"}, "claude")
+	if strings.Contains(out, "Latest handoff") || strings.Contains(out, "handoff") {
+		t.Errorf("direct BuildPrompt without LatestHandoff must not mention handoffs\n--- output ---\n%s", out)
+	}
+}
+
+// TestBuildPromptCommentIncludesHandoffAsBackground verifies comment-triggered
+// prompts include the latest handoff as background issue state WITHOUT hiding
+// the triggering comment: the trigger block must still be present and the
+// handoff block must explicitly defer to it.
+func TestBuildPromptCommentIncludesHandoffAsBackground(t *testing.T) {
+	out := BuildPrompt(Task{
+		IssueID:               "issue-handoff-3",
+		TriggerCommentID:      "c-1",
+		TriggerCommentContent: "Please fix the failing migration test.",
+		LatestHandoff: &HandoffData{
+			ID:            "h-2",
+			CreatedAt:     "2026-06-11T17:00:00Z",
+			AuthorType:    "agent",
+			AuthorName:    "Backend Engineer",
+			WorkCompleted: "Implemented the handoff API.",
+		},
+	}, "claude")
+
+	for _, s := range []string{
+		"[NEW COMMENT]",
+		"Please fix the failing migration test.",
+		"## Latest handoff",
+		"Implemented the handoff API.",
+		// The handoff is context; the trigger stays the task.
+		"the triggering comment above",
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("comment BuildPrompt missing %q\n--- output ---\n%s", s, out)
+		}
+	}
+	// The trigger must come first — handoff context must not displace it.
+	if strings.Index(out, "[NEW COMMENT]") > strings.Index(out, "## Latest handoff") {
+		t.Errorf("triggering comment must precede the handoff context block\n--- output ---\n%s", out)
+	}
+}
+
+// TestBuildPromptHandoffSkipsEmptyFieldsAndOtherKinds verifies empty handoff
+// fields are omitted from the rendered block, and that chat / autopilot /
+// quick-create prompts never render handoff context even if a server sent it.
+func TestBuildPromptHandoffSkipsEmptyFieldsAndOtherKinds(t *testing.T) {
+	h := &HandoffData{
+		ID:            "h-3",
+		CreatedAt:     "2026-06-11T17:00:00Z",
+		WorkCompleted: "Only this field is set.",
+	}
+	out := BuildPrompt(Task{IssueID: "issue-handoff-4", LatestHandoff: h}, "claude")
+	if !strings.Contains(out, "Only this field is set.") {
+		t.Errorf("expected work_completed rendered\n--- output ---\n%s", out)
+	}
+	for _, s := range []string{"Work remaining:", "Decisions made:", "Uncertainties:"} {
+		if strings.Contains(out, s) {
+			t.Errorf("empty handoff field %q must be omitted\n--- output ---\n%s", s, out)
+		}
+	}
+
+	for name, task := range map[string]Task{
+		"chat":         {ChatSessionID: "cs-1", ChatMessage: "hi", LatestHandoff: h},
+		"autopilot":    {AutopilotRunID: "ar-1", LatestHandoff: h},
+		"quick_create": {QuickCreatePrompt: "make an issue", LatestHandoff: h},
+	} {
+		if out := BuildPrompt(task, "claude"); strings.Contains(out, "Latest handoff") {
+			t.Errorf("%s prompt must not render handoff context\n--- output ---\n%s", name, out)
+		}
+	}
+}

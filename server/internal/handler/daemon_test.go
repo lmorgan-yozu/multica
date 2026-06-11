@@ -3856,3 +3856,125 @@ func TestClaimTaskByRuntime_CommentResumeDefaultOn(t *testing.T) {
 		t.Errorf("prior_session_id = %q, want %q (comment resume is default-on)", resp.Task.PriorSessionID, priorSession)
 	}
 }
+
+// TestClaimTaskByRuntime_PopulatesLatestHandoff verifies the claim response
+// carries the issue's most recent structured handoff with display names
+// resolved server-side (ADA-23) — and specifically the LATEST one when
+// several exist.
+func TestClaimTaskByRuntime_PopulatesLatestHandoff(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Latest handoff claim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Latest handoff claim agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	// Older handoff first, then the one the claim must surface. created_at
+	// is forced apart so ordering never races the clock.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue_handoff (workspace_id, issue_id, author_type, author_id, work_completed, created_at)
+		VALUES ($1, $2, 'agent', $3, 'older handoff', now() - interval '1 hour')
+	`, testWorkspaceID, issueID, agentID); err != nil {
+		t.Fatalf("insert older handoff: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue_handoff (
+			workspace_id, issue_id, author_type, author_id,
+			next_assignee_type, next_assignee_id,
+			work_completed, work_remaining, decisions_made, uncertainties
+		)
+		VALUES ($1, $2, 'agent', $3, 'member', $4,
+			'newest completed', 'newest remaining', 'newest decisions', 'newest uncertainties')
+	`, testWorkspaceID, issueID, agentID, testUserID); err != nil {
+		t.Fatalf("insert latest handoff: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue_handoff WHERE issue_id = $1`, issueID) })
+
+	var agentName, userName string
+	if err := testPool.QueryRow(ctx, `SELECT name FROM agent WHERE id = $1`, agentID).Scan(&agentName); err != nil {
+		t.Fatalf("read agent name: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT name FROM "user" WHERE id = $1`, testUserID).Scan(&userName); err != nil {
+		t.Fatalf("read user name: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "latest-handoff-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID            string           `json:"id"`
+			LatestHandoff *TaskHandoffData `json:"latest_handoff"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil || resp.Task.ID != taskID {
+		t.Fatalf("expected task %s claimed, got %+v: %s", taskID, resp.Task, w.Body.String())
+	}
+	h := resp.Task.LatestHandoff
+	if h == nil {
+		t.Fatalf("expected latest_handoff on claim response, got nil: %s", w.Body.String())
+	}
+	if h.WorkCompleted != "newest completed" {
+		t.Errorf("latest_handoff.work_completed = %q, want the NEWEST record's content", h.WorkCompleted)
+	}
+	if h.WorkRemaining != "newest remaining" || h.DecisionsMade != "newest decisions" || h.Uncertainties != "newest uncertainties" {
+		t.Errorf("latest_handoff content fields incomplete: %+v", h)
+	}
+	if h.AuthorType != "agent" || h.AuthorName != agentName {
+		t.Errorf("latest_handoff author = %s/%q, want agent/%q", h.AuthorType, h.AuthorName, agentName)
+	}
+	if h.NextAssigneeType != "member" || h.NextAssigneeName != userName {
+		t.Errorf("latest_handoff next assignee = %s/%q, want member/%q", h.NextAssigneeType, h.NextAssigneeName, userName)
+	}
+	if h.CreatedAt == "" || h.ID == "" {
+		t.Errorf("latest_handoff must carry id and created_at: %+v", h)
+	}
+}
+
+// TestClaimTaskByRuntime_NoHandoffOmitsField locks in ADA-23's additive
+// guarantee at the API boundary: an issue with no handoff records claims
+// exactly as before, with no latest_handoff key in the response at all.
+func TestClaimTaskByRuntime_NoHandoffOmitsField(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "No handoff claim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "No handoff claim agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "no-handoff-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Task *struct {
+			ID string `json:"id"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil || resp.Task.ID != taskID {
+		t.Fatalf("expected task %s claimed: %s", taskID, w.Body.String())
+	}
+	if bytes.Contains(w.Body.Bytes(), []byte("latest_handoff")) {
+		t.Errorf("claim response must omit latest_handoff when the issue has none: %s", w.Body.String())
+	}
+}

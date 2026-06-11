@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -391,4 +392,87 @@ func (h *Handler) followUpIssueIDsForHandoffs(r *http.Request, rows []db.IssueHa
 		out[key] = append(out[key], row.IssueID)
 	}
 	return out, nil
+}
+
+// TaskHandoffData is the concise structured handoff context embedded in
+// daemon claim responses (AgentTaskResponse.LatestHandoff). It carries the
+// latest handoff's content plus resolved display names — the daemon renders
+// it straight into the agent brief, so UUIDs alone would be useless there.
+// The mirror struct on the daemon side lives in internal/daemon/types.go
+// and uses the same JSON field names.
+type TaskHandoffData struct {
+	ID               string `json:"id"`
+	CreatedAt        string `json:"created_at"`
+	AuthorType       string `json:"author_type,omitempty"`
+	AuthorName       string `json:"author_name,omitempty"`
+	NextAssigneeType string `json:"next_assignee_type,omitempty"`
+	NextAssigneeName string `json:"next_assignee_name,omitempty"`
+	WorkCompleted    string `json:"work_completed,omitempty"`
+	WorkRemaining    string `json:"work_remaining,omitempty"`
+	DecisionsMade    string `json:"decisions_made,omitempty"`
+	Uncertainties    string `json:"uncertainties,omitempty"`
+}
+
+// latestHandoffTaskData loads the most recent handoff for an issue and
+// shapes it for a claim response. Returns nil when the issue has no
+// handoffs or on any error — handoff context is additive and must never
+// block a claim. The query is scoped by (workspace_id, issue_id), so a
+// task can never receive handoff context from another workspace or issue.
+func (h *Handler) latestHandoffTaskData(ctx context.Context, workspaceID, issueID pgtype.UUID) *TaskHandoffData {
+	row, err := h.Queries.GetLatestIssueHandoff(ctx, db.GetLatestIssueHandoffParams{
+		WorkspaceID: workspaceID,
+		IssueID:     issueID,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("load latest handoff for claim failed",
+				"error", err, "issue_id", uuidToString(issueID))
+		}
+		return nil
+	}
+
+	data := &TaskHandoffData{
+		ID:            uuidToString(row.ID),
+		CreatedAt:     timestampToString(row.CreatedAt),
+		WorkCompleted: row.WorkCompleted,
+		WorkRemaining: row.WorkRemaining,
+		DecisionsMade: row.DecisionsMade,
+		Uncertainties: row.Uncertainties,
+	}
+	if row.AuthorType.Valid {
+		data.AuthorType = row.AuthorType.String
+		data.AuthorName = h.actorDisplayName(ctx, workspaceID, row.AuthorType.String, row.AuthorID)
+	}
+	if row.NextAssigneeType.Valid {
+		data.NextAssigneeType = row.NextAssigneeType.String
+		data.NextAssigneeName = h.actorDisplayName(ctx, workspaceID, row.NextAssigneeType.String, row.NextAssigneeID)
+	}
+	return data
+}
+
+// actorDisplayName resolves a display name for an (actorType, actorID)
+// pair as stored on handoff rows. Best-effort: returns "" when the actor
+// can't be resolved, and the brief renders the bare type instead.
+func (h *Handler) actorDisplayName(ctx context.Context, workspaceID pgtype.UUID, actorType string, actorID pgtype.UUID) string {
+	if !actorID.Valid {
+		return ""
+	}
+	switch actorType {
+	case "agent":
+		if a, err := h.Queries.GetAgent(ctx, actorID); err == nil {
+			return a.Name
+		}
+	case "member":
+		if u, err := h.Queries.GetUser(ctx, actorID); err == nil {
+			return u.Name
+		}
+	case "squad":
+		if s, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID:          actorID,
+			WorkspaceID: workspaceID,
+		}); err == nil {
+			return s.Name
+		}
+	}
+	return ""
 }

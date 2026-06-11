@@ -13,15 +13,20 @@ hand-off, and a hard escalation list (scope/cost, prod deploys, fundamental
 architecture, ambiguity, anything touching the public Multica project).
 Engineers and QA are additionally bound to the `tdd` skill.
 
+**Model policy:** Favour the Fable model (`claude-fable-5`) for deep, complex, ambiguous, or cross-cutting work. Use the cheaper Codex/Gemini roles for simple, small, well-specified pieces (explicit human direction).
+
+**Vision is intent:** The vision documents are intent, not a spec. Agents should propose missing capabilities as new issues to the PO. Thinking beyond the documents is expected.
+
 ## Roster
 
 | Role | Model / runtime | Purpose |
 | --- | --- | --- |
 | Product Owner | gpt-5.5 (Codex) | Owns the backlog and acceptance against the vision docs; casting vote on product intent |
 | Delivery Lead | gpt-5.5 (Codex) | Flow, risk, and status; squad leader; watches for stalls and token burn |
-| Tech Lead | gpt-5.5 (Codex) | Technical direction and breakdown; casting vote on technical deadlocks |
+| Tech Lead | claude-fable-5 (Claude) | Technical direction and breakdown; casting vote on technical deadlocks |
 | Backend Engineer | gpt-5.5 (Codex) | Go server, schema, API, daemon/CLI |
 | Frontend Engineer | gpt-5.5 (Codex) | Next.js web app |
+| UX/UI Designer | gpt-5.5 (Codex) | Design specs + UX review; casting vote on UX |
 | Fable Engineer (HIGH COST) | claude-fable-5 (Claude) | Complex, ambiguous, cross-cutting work only — Tech Lead must justify its use |
 | Code Reviewer | claude-fable-5 (Claude) | Primary quality gate; deliberately a different provider from the implementing engineers |
 | QA Engineer | gpt-5.5 (Codex) | Verification against acceptance criteria; release-readiness casting vote |

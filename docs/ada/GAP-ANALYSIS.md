@@ -27,6 +27,10 @@ workspace ("Ada Bootstrapping" project).
 | ADA-6 Agent memory | No shared long-term memory; pgvector substrate already present | handoffs (ADA-2) as a memory source |
 | ADA-7 PM workflows | No RAID log, budget burn, or status-report workflows | autopilots, documents library, spend (ADA-3) |
 | ADA-8 QA workflows | No evidence packs or release-readiness reporting | documents library, skills |
+| ADA-30 Project intake | No structured process or agent role for initial project intake and repository setup | autopilots |
+| ADA-31 Design in the loop | No UX/UI workflow integration or designer agent participation in the delivery cycle | handoffs (ADA-2), workflows |
+| ADA-32 Skills lifecycle | No managed lifecycle, versioning, or deployment pipeline for workspace agent skills | skills library |
+| ADA-33 PR-native delivery | No seamless integration for agents creating and managing Pull Requests natively | task lifecycle |
 
 ## Sequencing rationale
 

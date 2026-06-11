@@ -9,8 +9,7 @@ from the patterns proven in the Arcus FM workspace.
 Every agent is bound to the `ada-house-rules` workspace skill: plain
 British English, small reviewable changes, feature-branch flow on the
 private fork, structured hand-off comments, status + reassignment on every
-hand-off, and a hard escalation list (scope/cost, prod deploys, fundamental
-architecture, ambiguity, anything touching the public Multica project).
+hand-off, and a mandatory escalation list (see Human gates section).
 Engineers and QA are additionally bound to the `tdd` skill.
 
 ## Roster
@@ -26,7 +25,7 @@ Engineers and QA are additionally bound to the `tdd` skill.
 | Code Reviewer | claude-fable-5 (Claude) | Primary quality gate; deliberately a different provider from the implementing engineers |
 | QA Engineer | gpt-5.5 (Codex) | Verification against acceptance criteria; release-readiness casting vote |
 | Security Reviewer | claude-fable-5 (Claude) | Auth, tenant isolation, secrets, untrusted input; verdict is a veto |
-| DevOps Engineer | gpt-5.5 (Codex) | Builds and deploys to staging; prod is always human-gated |
+| DevOps Engineer | gpt-5.5 (Codex) | Builds and deploys to staging; prod human-gated under default model; this workspace runs under the ADA-1 exception (see Human gates) |
 | Technical Writer | pro (Gemini) | Keeps fork docs and runbooks accurate |
 
 Squad: **Ada Platform Team**, led by the Delivery Lead. Squad-routed work
@@ -39,7 +38,7 @@ Engineer (in_progress → in_review, reassign Code Reviewer)
   → Code Reviewer (approve → reassign QA; or back to engineer)
     → QA Engineer (pass → reassign Product Owner; or back to engineer)
       → Product Owner acceptance (→ DevOps for staging deploy, or done)
-        → DevOps (staging deploy + checks; prod prepared, human executes)
+        → DevOps (staging deploy + checks; see Human gates for prod execution)
 Security Reviewer: on referral, anywhere in the chain; their no is final.
 ```
 

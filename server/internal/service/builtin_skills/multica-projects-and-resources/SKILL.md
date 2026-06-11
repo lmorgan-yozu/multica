@@ -34,6 +34,7 @@ Common resource types:
 ```bash
 multica project list --output json
 multica project get <project-id> --output json
+multica project roadmap <project-id> --output json
 multica project create --title "<title>" --repo <github-url> --output json
 multica project update <project-id> --title "<title>" --output json
 multica project status <project-id> in_progress --output json
@@ -45,6 +46,11 @@ multica project resource remove <project-id> <resource-id> --output json
 ```
 
 Use `--ref '<json>'` only for resource types or payloads not covered by shortcuts.
+
+`project roadmap` is a read-only projection of the project's issue graph:
+top-level issues as epics in dependency order with done/total leaf progress,
+plus milestone groupings. It returns the same shape as
+`GET /api/projects/{id}/roadmap`; there is no roadmap state to hand-maintain.
 
 ## When to add a resource
 

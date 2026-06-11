@@ -41,11 +41,16 @@ type IssueResponse struct {
 	CreatorID     string  `json:"creator_id"`
 	ParentIssueID *string `json:"parent_issue_id"`
 	ProjectID     *string `json:"project_id"`
-	Position      float64 `json:"position"`
-	StartDate     *string `json:"start_date"`
-	DueDate       *string `json:"due_date"`
-	CreatedAt     string  `json:"created_at"`
-	UpdatedAt     string  `json:"updated_at"`
+	// MilestoneID is the roadmap milestone grouping (ADA-57). Pointer +
+	// omitempty because list queries with enumerated column sets don't load
+	// it — absent means "not loaded", not "no milestone". Full-row paths
+	// (get/create/update) always emit it when set.
+	MilestoneID *string `json:"milestone_id,omitempty"`
+	Position    float64 `json:"position"`
+	StartDate   *string `json:"start_date"`
+	DueDate     *string `json:"due_date"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
@@ -78,6 +83,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatorID:     uuidToString(i.CreatorID),
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
+		MilestoneID:   uuidToPtr(i.MilestoneID),
 		Position:      i.Position,
 		StartDate:     dateToPtr(i.StartDate),
 		DueDate:       dateToPtr(i.DueDate),

@@ -399,13 +399,15 @@ type Issue struct {
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
 	StartDate          pgtype.Date        `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
+	MilestoneID        pgtype.UUID        `json:"milestone_id"`
 }
 
 type IssueDependency struct {
-	ID               pgtype.UUID `json:"id"`
-	IssueID          pgtype.UUID `json:"issue_id"`
-	DependsOnIssueID pgtype.UUID `json:"depends_on_issue_id"`
-	Type             string      `json:"type"`
+	ID               pgtype.UUID        `json:"id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	DependsOnIssueID pgtype.UUID        `json:"depends_on_issue_id"`
+	Type             string             `json:"type"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 type IssueLabel struct {
@@ -561,6 +563,17 @@ type Member struct {
 	UserID      pgtype.UUID        `json:"user_id"`
 	Role        string             `json:"role"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type Milestone struct {
+	ID          pgtype.UUID        `json:"id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	TargetDate  pgtype.Date        `json:"target_date"`
+	Position    float64            `json:"position"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type NotificationPreference struct {

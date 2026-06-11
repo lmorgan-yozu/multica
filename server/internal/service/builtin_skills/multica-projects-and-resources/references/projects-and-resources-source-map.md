@@ -2,6 +2,7 @@
 
 - `server/cmd/multica/cmd_project.go` registers project `list`, `get`, `create`, `update`, `delete`, and `status`.
 - The same file registers `project resource list/add/update/remove`.
+- `server/cmd/multica/cmd_project_roadmap.go` registers `project roadmap`, wrapping `GET /api/projects/{id}/roadmap` (read-only projection: epics, milestones, dependency order, leaf progress).
 - `project create --repo` attaches `github_repo` resources during project creation.
 - `project resource add` supports shortcuts for `github_repo` (`--url`, `--default-branch-hint`) and `local_directory` (`--local-path`, `--daemon-id`, `--ref-label`), or generic `--ref '<json>'`.
 - `project resource update` merges shortcut edits with existing `resource_ref` so a partial edit does not clobber required fields.

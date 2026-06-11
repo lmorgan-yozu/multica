@@ -34,7 +34,7 @@ UPDATE issue SET
     status = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, milestone_id
 `
 
 type AssignIssueToWorkflowStepParams struct {
@@ -73,6 +73,7 @@ func (q *Queries) AssignIssueToWorkflowStep(ctx context.Context, arg AssignIssue
 		&i.FirstExecutedAt,
 		&i.StartDate,
 		&i.Metadata,
+		&i.MilestoneID,
 	)
 	return i, err
 }

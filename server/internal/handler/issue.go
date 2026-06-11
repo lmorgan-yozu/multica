@@ -2364,6 +2364,23 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Determine actor identity before transition enforcement so configured
+	// gates apply equally to member, agent, CLI, API, and UI callers.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	var passedGates []qualityGate
+	if req.Status != nil && *req.Status != prevIssue.Status {
+		var decision *qualityGateDecision
+		passedGates, decision, err = h.enforceIssueQualityGates(r.Context(), prevIssue, prevIssue.Status, *req.Status, actorType, actorID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to enforce quality gates")
+			return
+		}
+		if decision != nil {
+			writeError(w, http.StatusConflict, decision.Reason)
+			return
+		}
+	}
+
 	issue, err := h.Queries.UpdateIssue(r.Context(), params)
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
@@ -2391,9 +2408,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	prevDueDate := dateToPtr(prevIssue.DueDate)
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
-
-	// Determine actor identity: agent (via X-Agent-ID header) or member.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 		"issue":               resp,
@@ -2465,6 +2479,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// loops in PR #2918). The helper guards on transition + parent state and
 	// fails best-effort.
 	if statusChanged {
+		h.recordIssueQualityGateEvents(r.Context(), issue, passedGates, prevIssue.Status, issue.Status, actorType, actorID)
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
 		// Role-based handoff workflows: opt-in no-op unless the issue is bound
 		// to a workflow. Advances the chain when the current step's agent
@@ -2893,6 +2908,16 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		var passedGates []qualityGate
+		if req.Updates.Status != nil && *req.Updates.Status != prevIssue.Status {
+			var decision *qualityGateDecision
+			passedGates, decision, err = h.enforceIssueQualityGates(r.Context(), prevIssue, prevIssue.Status, *req.Updates.Status, actorType, actorID)
+			if err != nil || decision != nil {
+				continue
+			}
+		}
+
 		issue, err := h.Queries.UpdateIssue(r.Context(), params)
 		if err != nil {
 			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
@@ -2901,7 +2926,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
@@ -2948,6 +2972,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// Platform-driven parent notification, mirrored from UpdateIssue
 		// (MUL-2538). Best-effort; failure does not abort the batch.
 		if statusChanged {
+			h.recordIssueQualityGateEvents(r.Context(), issue, passedGates, prevIssue.Status, issue.Status, actorType, actorID)
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
 			h.advanceWorkflowOnStatusChange(r.Context(), prevIssue, issue, actorType, actorID)
 		}

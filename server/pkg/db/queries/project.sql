@@ -16,9 +16,9 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: CreateProject :one
 INSERT INTO project (
     workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority
+    lead_type, lead_id, priority, quality_gate_config
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8, COALESCE(sqlc.narg('quality_gate_config')::jsonb, '{}'::jsonb)
 ) RETURNING *;
 
 -- name: UpdateProject :one
@@ -30,6 +30,7 @@ UPDATE project SET
     priority = COALESCE(sqlc.narg('priority'), priority),
     lead_type = sqlc.narg('lead_type'),
     lead_id = sqlc.narg('lead_id'),
+    quality_gate_config = COALESCE(sqlc.narg('quality_gate_config')::jsonb, quality_gate_config),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

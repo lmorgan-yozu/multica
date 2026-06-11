@@ -34,22 +34,24 @@ type ProjectResponse struct {
 	// /api/projects/{id}/resources. Resources themselves stay out of this
 	// payload to keep parent metadata and child collections separate; clients
 	// that need the list call ListProjectResources directly.
-	ResourceCount int64 `json:"resource_count"`
+	ResourceCount     int64           `json:"resource_count"`
+	QualityGateConfig json.RawMessage `json:"quality_gate_config,omitempty"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
 	return ProjectResponse{
-		ID:          uuidToString(p.ID),
-		WorkspaceID: uuidToString(p.WorkspaceID),
-		Title:       p.Title,
-		Description: textToPtr(p.Description),
-		Icon:        textToPtr(p.Icon),
-		Status:      p.Status,
-		Priority:    p.Priority,
-		LeadType:    textToPtr(p.LeadType),
-		LeadID:      uuidToPtr(p.LeadID),
-		CreatedAt:   timestampToString(p.CreatedAt),
-		UpdatedAt:   timestampToString(p.UpdatedAt),
+		ID:                uuidToString(p.ID),
+		WorkspaceID:       uuidToString(p.WorkspaceID),
+		Title:             p.Title,
+		Description:       textToPtr(p.Description),
+		Icon:              textToPtr(p.Icon),
+		Status:            p.Status,
+		Priority:          p.Priority,
+		LeadType:          textToPtr(p.LeadType),
+		LeadID:            uuidToPtr(p.LeadID),
+		CreatedAt:         timestampToString(p.CreatedAt),
+		UpdatedAt:         timestampToString(p.UpdatedAt),
+		QualityGateConfig: json.RawMessage(p.QualityGateConfig),
 	}
 }
 
@@ -70,14 +72,15 @@ func (h *Handler) loadProjectResourceCount(ctx context.Context, projectID pgtype
 }
 
 type CreateProjectRequest struct {
-	Title       string                                `json:"title"`
-	Description *string                               `json:"description"`
-	Icon        *string                               `json:"icon"`
-	Status      string                                `json:"status"`
-	Priority    string                                `json:"priority"`
-	LeadType    *string                               `json:"lead_type"`
-	LeadID      *string                               `json:"lead_id"`
-	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
+	Title             string                                `json:"title"`
+	Description       *string                               `json:"description"`
+	Icon              *string                               `json:"icon"`
+	Status            string                                `json:"status"`
+	Priority          string                                `json:"priority"`
+	LeadType          *string                               `json:"lead_type"`
+	LeadID            *string                               `json:"lead_id"`
+	QualityGateConfig json.RawMessage                       `json:"quality_gate_config,omitempty"`
+	Resources         []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
 }
 
 // CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but
@@ -91,13 +94,14 @@ type CreateProjectResourceRequestPayload struct {
 }
 
 type UpdateProjectRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      *string `json:"status"`
-	Priority    *string `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
+	Title             *string         `json:"title"`
+	Description       *string         `json:"description"`
+	Icon              *string         `json:"icon"`
+	Status            *string         `json:"status"`
+	Priority          *string         `json:"priority"`
+	LeadType          *string         `json:"lead_type"`
+	LeadID            *string         `json:"lead_id"`
+	QualityGateConfig json.RawMessage `json:"quality_gate_config,omitempty"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -259,14 +263,15 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	createParams := db.CreateProjectParams{
-		WorkspaceID: wsUUID,
-		Title:       req.Title,
-		Description: ptrToText(req.Description),
-		Icon:        ptrToText(req.Icon),
-		Status:      status,
-		LeadType:    leadType,
-		LeadID:      leadID,
-		Priority:    priority,
+		WorkspaceID:       wsUUID,
+		Title:             req.Title,
+		Description:       ptrToText(req.Description),
+		Icon:              ptrToText(req.Icon),
+		Status:            status,
+		LeadType:          leadType,
+		LeadID:            leadID,
+		Priority:          priority,
+		QualityGateConfig: normalizeProjectQualityGateConfig(req.QualityGateConfig),
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -393,11 +398,12 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(bodyBytes, &rawFields)
 
 	params := db.UpdateProjectParams{
-		ID:          prevProject.ID,
-		Description: prevProject.Description,
-		Icon:        prevProject.Icon,
-		LeadType:    prevProject.LeadType,
-		LeadID:      prevProject.LeadID,
+		ID:                prevProject.ID,
+		Description:       prevProject.Description,
+		Icon:              prevProject.Icon,
+		LeadType:          prevProject.LeadType,
+		LeadID:            prevProject.LeadID,
+		QualityGateConfig: prevProject.QualityGateConfig,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -439,6 +445,9 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		} else {
 			params.LeadID = pgtype.UUID{Valid: false}
 		}
+	}
+	if _, ok := rawFields["quality_gate_config"]; ok {
+		params.QualityGateConfig = normalizeProjectQualityGateConfig(req.QualityGateConfig)
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)
 	if err != nil {

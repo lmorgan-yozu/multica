@@ -17,7 +17,10 @@ Hard rules for this repository:
 - Feature branch + review flow; `main` moves only after review.
 - The deployed instance (agents.tauntondene.io) runs this code — the
   platform you are modifying is the platform the team runs on. Migrations
-  and deploys are production changes; staging first, prod is human-gated.
+  and deploys are production changes; staging first. While the DEFAULT model
+  requires human-gated prod deploys (and ADA-30 template exports always carry
+  this default), this workspace operates under the ADA-1 exception: standing
+  build authorisation and backup+rollback discipline for risky moves.
 
 Contents:
 

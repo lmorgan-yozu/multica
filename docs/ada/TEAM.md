@@ -9,8 +9,9 @@ from the patterns proven in the Arcus FM workspace.
 Every agent is bound to the `ada-house-rules` workspace skill: plain
 British English, small reviewable changes, feature-branch flow on the
 private fork, structured hand-off comments, status + reassignment on every
-hand-off, and a hard escalation list (scope/cost, prod deploys, fundamental
-architecture, ambiguity, anything touching the public Multica project).
+hand-off, review chain as quality gate, backup + rollback discipline for
+risky moves, and human escalation only for public-Multica/Yozu IP/client-facing
+exposure, destructive operations without workable rollback, or new spend/credentials.
 Engineers and QA are additionally bound to the `tdd` skill.
 
 ## Roster

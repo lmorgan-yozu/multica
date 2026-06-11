@@ -225,6 +225,11 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	qualityGateConfig, err := validateAndNormalizeProjectQualityGateConfig(req.QualityGateConfig)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Pre-validate every resource payload before opening a transaction so an
 	// invalid ref produces a clean 400 with no DB work. For local_directory we
@@ -271,7 +276,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		LeadType:          leadType,
 		LeadID:            leadID,
 		Priority:          priority,
-		QualityGateConfig: normalizeProjectQualityGateConfig(req.QualityGateConfig),
+		QualityGateConfig: qualityGateConfig,
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -447,7 +452,12 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if _, ok := rawFields["quality_gate_config"]; ok {
-		params.QualityGateConfig = normalizeProjectQualityGateConfig(req.QualityGateConfig)
+		qualityGateConfig, err := validateAndNormalizeProjectQualityGateConfig(req.QualityGateConfig)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		params.QualityGateConfig = qualityGateConfig
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)
 	if err != nil {

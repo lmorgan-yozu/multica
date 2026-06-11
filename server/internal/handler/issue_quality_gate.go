@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -48,6 +51,34 @@ func normalizeProjectQualityGateConfig(raw json.RawMessage) []byte {
 	return raw
 }
 
+func validateAndNormalizeProjectQualityGateConfig(raw json.RawMessage) ([]byte, error) {
+	normalized := normalizeProjectQualityGateConfig(raw)
+	if string(normalized) == "{}" {
+		return normalized, nil
+	}
+	if !bytes.HasPrefix(bytes.TrimSpace(normalized), []byte("{")) {
+		return nil, fmt.Errorf("quality_gate_config must be an object with a gates array")
+	}
+	var cfg qualityGateConfig
+	if err := json.Unmarshal(normalized, &cfg); err != nil {
+		return nil, fmt.Errorf("quality_gate_config must be an object with a gates array")
+	}
+	for i, gate := range cfg.Gates {
+		if strings.TrimSpace(gate.Key) == "" {
+			return nil, fmt.Errorf("quality_gate_config.gates[%d].key is required", i)
+		}
+		if strings.TrimSpace(gate.Transition.From) == "" || strings.TrimSpace(gate.Transition.To) == "" {
+			return nil, fmt.Errorf("quality_gate_config.gates[%d].transition.from and transition.to are required", i)
+		}
+		switch gate.RequiredActorType {
+		case "", "member", "agent", "system":
+		default:
+			return nil, fmt.Errorf("quality_gate_config.gates[%d].required_actor_type must be member, agent, or system", i)
+		}
+	}
+	return normalized, nil
+}
+
 func (h *Handler) enforceIssueQualityGates(ctx context.Context, issue db.Issue, fromStatus, toStatus, actorType, actorID string) ([]qualityGate, *qualityGateDecision, error) {
 	state, ok, err := h.loadIssueQualityGateProjectState(ctx, issue)
 	if err != nil || !ok {
@@ -56,15 +87,26 @@ func (h *Handler) enforceIssueQualityGates(ctx context.Context, issue db.Issue, 
 
 	var passed []qualityGate
 	for _, gate := range state.Config.Gates {
-		if gate.Transition.From != fromStatus || gate.Transition.To != toStatus {
+		if gate.Transition.To != toStatus {
 			continue
 		}
-		if gate.Key == "" {
-			gate.Key = gate.Name
+
+		eventExists, err := h.issueQualityGateEventExists(ctx, issue.ID, gate)
+		if err != nil {
+			return nil, nil, err
 		}
-		if gate.Name == "" {
-			gate.Name = gate.Key
+		if eventExists {
+			continue
 		}
+
+		currentTransitionCanPassGate := gate.Transition.From == fromStatus
+		if !currentTransitionCanPassGate {
+			return nil, &qualityGateDecision{
+				Gate:   gate,
+				Reason: fmt.Sprintf("missing quality gate %q: %s must pass before moving to %s", gate.Name, gateRole(gate), gate.Transition.To),
+			}, nil
+		}
+
 		if gate.RequiredActorType != "" && gate.RequiredActorType != actorType {
 			return nil, &qualityGateDecision{
 				Gate:   gate,
@@ -72,7 +114,7 @@ func (h *Handler) enforceIssueQualityGates(ctx context.Context, issue db.Issue, 
 			}, nil
 		}
 		if gate.Independent && actorType == "agent" && actorID != "" {
-			same, err := h.agentMateriallyImplementedIssue(ctx, issue.ID, actorID)
+			same, err := h.agentMateriallyImplementedIssue(ctx, issue, actorID)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -131,7 +173,22 @@ func (h *Handler) loadIssueQualityGateProjectState(ctx context.Context, issue db
 	return qualityGateProjectState{ProjectID: projectID, Config: cfg}, true, nil
 }
 
-func (h *Handler) agentMateriallyImplementedIssue(ctx context.Context, issueID pgtype.UUID, agentID string) (bool, error) {
+func (h *Handler) issueQualityGateEventExists(ctx context.Context, issueID pgtype.UUID, gate qualityGate) (bool, error) {
+	var exists bool
+	err := h.DB.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM issue_quality_gate_event
+			WHERE issue_id = $1
+			  AND gate_key = $2
+			  AND from_status = $3
+			  AND to_status = $4
+		)
+	`, issueID, gate.Key, gate.Transition.From, gate.Transition.To).Scan(&exists)
+	return exists, err
+}
+
+func (h *Handler) agentMateriallyImplementedIssue(ctx context.Context, issue db.Issue, agentID string) (bool, error) {
 	var exists bool
 	err := h.DB.QueryRow(ctx, `
 		SELECT EXISTS (
@@ -141,8 +198,9 @@ func (h *Handler) agentMateriallyImplementedIssue(ctx context.Context, issueID p
 			  AND agent_id = $2::uuid
 			  AND status IN ('running', 'completed')
 			  AND (started_at IS NOT NULL OR completed_at IS NOT NULL)
+			  AND COALESCE(started_at, completed_at, created_at) < $3
 		)
-	`, issueID, agentID).Scan(&exists)
+	`, issue.ID, agentID, issue.UpdatedAt).Scan(&exists)
 	return exists, err
 }
 
@@ -161,7 +219,7 @@ func (h *Handler) recordIssueQualityGateEvents(ctx context.Context, issue db.Iss
 				from_status, to_status, actor_type, actor_id
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		`, issue.WorkspaceID, issue.ProjectID, issue.ID, gate.Key, gate.Name, fromStatus, toStatus, actorType, actorUUID); err != nil {
-			continue
+			slog.Warn("record issue quality gate event failed", "issue_id", uuidToString(issue.ID), "gate_key", gate.Key, "error", err)
 		}
 	}
 }
@@ -197,7 +255,7 @@ func (h *Handler) GetIssueQualityGates(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.DB.Query(r.Context(), `
-		SELECT gate_key, actor_type, actor_id, created_at
+		SELECT gate_key, from_status, to_status, actor_type, actor_id, created_at
 		FROM issue_quality_gate_event
 		WHERE issue_id = $1
 		ORDER BY created_at DESC
@@ -209,15 +267,16 @@ func (h *Handler) GetIssueQualityGates(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	completed := map[string]map[string]any{}
 	for rows.Next() {
-		var key, actorType string
+		var key, fromStatus, toStatus, actorType string
 		var actorID pgtype.UUID
 		var createdAt pgtype.Timestamptz
-		if err := rows.Scan(&key, &actorType, &actorID, &createdAt); err != nil {
+		if err := rows.Scan(&key, &fromStatus, &toStatus, &actorType, &actorID, &createdAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to read quality gate events")
 			return
 		}
-		if _, ok := completed[key]; !ok {
-			completed[key] = map[string]any{
+		completedKey := qualityGateEventKey(key, fromStatus, toStatus)
+		if _, ok := completed[completedKey]; !ok {
+			completed[completedKey] = map[string]any{
 				"actor_type": actorType,
 				"actor_id":   uuidToPtr(actorID),
 				"created_at": timestampToString(createdAt),
@@ -242,7 +301,7 @@ func (h *Handler) GetIssueQualityGates(w http.ResponseWriter, r *http.Request) {
 
 	gates := make([]gateState, 0, len(state.Config.Gates))
 	for _, gate := range state.Config.Gates {
-		event, complete := completed[gate.Key]
+		event, complete := completed[qualityGateEventKey(gate.Key, gate.Transition.From, gate.Transition.To)]
 		gs := gateState{
 			Key: gate.Key, Name: gate.Name, Order: gate.Order,
 			RequiredActorType: gate.RequiredActorType,
@@ -266,4 +325,8 @@ func (h *Handler) GetIssueQualityGates(w http.ResponseWriter, r *http.Request) {
 		"issue_id":   uuidToString(issue.ID),
 		"gates":      gates,
 	})
+}
+
+func qualityGateEventKey(key, fromStatus, toStatus string) string {
+	return key + "\x00" + fromStatus + "\x00" + toStatus
 }

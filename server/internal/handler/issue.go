@@ -2705,6 +2705,11 @@ type BatchUpdateIssuesRequest struct {
 	Updates  UpdateIssueRequest `json:"updates"`
 }
 
+type batchUpdateIssueSkip struct {
+	IssueID string `json:"issue_id"`
+	Reason  string `json:"reason"`
+}
+
 func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -2768,6 +2773,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated := 0
+	skipped := []batchUpdateIssueSkip{}
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
@@ -2913,7 +2919,13 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if req.Updates.Status != nil && *req.Updates.Status != prevIssue.Status {
 			var decision *qualityGateDecision
 			passedGates, decision, err = h.enforceIssueQualityGates(r.Context(), prevIssue, prevIssue.Status, *req.Updates.Status, actorType, actorID)
-			if err != nil || decision != nil {
+			if err != nil {
+				slog.Warn("batch update quality gate enforcement failed", "issue_id", issueID, "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to enforce quality gates")
+				return
+			}
+			if decision != nil {
+				skipped = append(skipped, batchUpdateIssueSkip{IssueID: issueID, Reason: decision.Reason})
 				continue
 			}
 		}
@@ -2981,7 +2993,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
-	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
+	resp := map[string]any{"updated": updated}
+	if len(skipped) > 0 {
+		resp["skipped"] = skipped
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type BatchDeleteIssuesRequest struct {

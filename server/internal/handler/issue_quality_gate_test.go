@@ -129,7 +129,22 @@ func TestIssueQualityGateBatchUpdateUsesSameEnforcement(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("batch update: expected stable 200 response, got %d: %s", w.Code, w.Body.String())
 	}
-	assertJSONEqual(t, w.Body.Bytes(), `{"updated":0}`)
+	var resp struct {
+		Updated int `json:"updated"`
+		Skipped []struct {
+			IssueID string `json:"issue_id"`
+			Reason  string `json:"reason"`
+		} `json:"skipped"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	if resp.Updated != 0 || len(resp.Skipped) != 1 {
+		t.Fatalf("expected one explained skip, got %s", w.Body.String())
+	}
+	if resp.Skipped[0].IssueID != issueID || !strings.Contains(resp.Skipped[0].Reason, "Code Reviewer") {
+		t.Fatalf("batch skip should explain required reviewer, got %+v", resp.Skipped[0])
+	}
 
 	var status string
 	if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&status); err != nil {
@@ -137,6 +152,62 @@ func TestIssueQualityGateBatchUpdateUsesSameEnforcement(t *testing.T) {
 	}
 	if status != "in_review" {
 		t.Fatalf("batch update bypassed gate, status = %q", status)
+	}
+}
+
+func TestIssueQualityGateRejectsTwoStepBypassIntoProtectedStatus(t *testing.T) {
+	projectID := createQualityGateProject(t, `{
+		"gates": [{
+			"key": "code_review",
+			"name": "Code review",
+			"order": 1,
+			"required_actor_type": "agent",
+			"required_role": "Code Reviewer",
+			"transition": {"from": "in_review", "to": "done"}
+		}]
+	}`)
+	issueID := createQualityGateIssue(t, projectID, "in_review")
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/issues/"+issueID, map[string]any{"status": "in_progress"})
+	req = withURLParam(req, "id", issueID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("setup move out of review: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+issueID, map[string]any{"status": "done"})
+	req = withURLParam(req, "id", issueID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("bypass into done: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "Code Reviewer") || !strings.Contains(w.Body.String(), "done") {
+		t.Fatalf("bypass rejection should explain protected gate, got %s", w.Body.String())
+	}
+}
+
+func TestProjectQualityGateConfigRejectsInvalidShape(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects", map[string]any{
+		"title":               "invalid gate project",
+		"quality_gate_config": map[string]any{"gates": 42},
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("create invalid gate config: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	projectID := createQualityGateProject(t, `{}`)
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/projects/"+projectID, map[string]any{
+		"quality_gate_config": []any{"not", "an", "object"},
+	})
+	req = withURLParam(req, "id", projectID)
+	testHandler.UpdateProject(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("update invalid gate config: expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -202,7 +273,8 @@ func createQualityGateIssue(t *testing.T, projectID, status string) string {
 	var issueID string
 	if err := testPool.QueryRow(context.Background(), `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, project_id, number)
-		VALUES ($1, $2, $3, 'medium', 'member', $4, $5, nextval('issue_number_seq'))
+		VALUES ($1, $2, $3, 'medium', 'member', $4, $5,
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, "gate issue "+time.Now().Format(time.RFC3339Nano), status, testUserID, projectID).Scan(&issueID); err != nil {
 		t.Fatalf("create gate issue: %v", err)

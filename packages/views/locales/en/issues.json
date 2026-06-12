@@ -260,6 +260,30 @@
   "timeline": {
     "loading": "Loading..."
   },
+  "loop_brake": {
+    "section": "Loop brake",
+    "paused_badge": "Paused",
+    "paused_tooltip": "New agent runs are paused by the loop detector.",
+    "state_clear": "Clear",
+    "state_paused": "Paused",
+    "state_cleared": "Cleared",
+    "paused_title": "New agent runs are paused",
+    "cleared_title": "Brake cleared",
+    "load_failed": "Loop brake state could not be loaded.",
+    "clear_reason": "Clear reason: {{reason}}",
+    "window_start": "Window start",
+    "window_end": "Window end",
+    "missing_progress": "Missing progress signals",
+    "signal_issue_update": "Issue status or field update",
+    "signal_comment": "Comment or handoff",
+    "signal_attachment": "Attachment",
+    "clear_reason_placeholder": "Why is it safe to resume agent runs?",
+    "clear_action": "Clear brake",
+    "clearing_action": "Clearing...",
+    "clear_success": "Loop brake cleared",
+    "clear_failed": "Failed to clear loop brake",
+    "clear_unauthorised": "Only workspace owners and admins can clear this brake."
+  },
   "activity": {
     "created": "created this issue",
     "self_assigned": "self-assigned this issue",

@@ -369,6 +369,9 @@ export function useRealtimeSync(
         // shape as the tasks invalidation above — any task lifecycle
         // event shifts the aggregated usage numbers.
         qc.invalidateQueries({ queryKey: ["issues", "usage"] });
+        // Loop brakes are evaluated when task runs settle. Prefix invalidation
+        // keeps board/list pills and the issue-detail brake panel current.
+        qc.invalidateQueries({ queryKey: issueKeys.loopBrakesAll() });
         // Squad members-status reads the same task lifecycle to flip
         // working ↔ idle for each agent member.
         invalidateSquadMemberStatusQueries(qc, wsId);
@@ -553,7 +556,10 @@ export function useRealtimeSync(
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment } = p as CommentCreatedPayload;
-      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      if (comment?.issue_id) {
+        invalidateTimeline(comment.issue_id);
+        qc.invalidateQueries({ queryKey: issueKeys.loopBrake(comment.issue_id) });
+      }
     });
 
     const unsubCommentUpdated = ws.on("comment:updated", (p) => {
@@ -581,6 +587,7 @@ export function useRealtimeSync(
       if (issue_id) {
         invalidateTimeline(issue_id);
         qc.invalidateQueries({ queryKey: issueKeys.qualityGates(issue_id) });
+        qc.invalidateQueries({ queryKey: issueKeys.loopBrake(issue_id) });
       }
     });
 

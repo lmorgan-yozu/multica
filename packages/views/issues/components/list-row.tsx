@@ -20,6 +20,7 @@ import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { IssueLoopBrakeIndicator } from "./issue-loop-brake";
 
 export interface ChildProgress {
   done: number;
@@ -100,6 +101,7 @@ function ListRowContent({
           <span className="w-16 shrink-0 text-xs text-muted-foreground">
             {issue.identifier}
           </span>
+          <IssueLoopBrakeIndicator issueId={issue.id} />
           <IssueAgentActivityIndicator issueId={issue.id} />
 
           <span className="flex min-w-0 flex-1 items-center gap-1.5">

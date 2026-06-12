@@ -76,6 +76,8 @@ export const issueKeys = {
    *  click time. */
   attachments: (issueId: string) => ["issues", "attachments", issueId] as const,
   qualityGates: (issueId: string) => ["issues", "quality-gates", issueId] as const,
+  loopBrakesAll: () => ["issues", "loop-brake"] as const,
+  loopBrake: (issueId: string) => [...issueKeys.loopBrakesAll(), issueId] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => ["issues", "tasks", issueId] as const,
   /** Prefix-match key for invalidating tasks across all issues — used by
@@ -244,6 +246,13 @@ export function issueQualityGatesOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.qualityGates(issueId),
     queryFn: () => api.getIssueQualityGates(issueId),
+  });
+}
+
+export function issueLoopBrakeOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.loopBrake(issueId),
+    queryFn: () => api.getIssueLoopBrake(issueId),
   });
 }
 

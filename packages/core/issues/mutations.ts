@@ -358,6 +358,25 @@ export function useOverrideIssueQualityGate() {
   });
 }
 
+export function useClearIssueLoopBrake() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      api.clearIssueLoopBrake(id, { reason }),
+    onSuccess: (brake, vars) => {
+      qc.setQueryData(issueKeys.loopBrake(vars.id), brake);
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars.id) });
+      qc.invalidateQueries({ queryKey: issueKeys.loopBrake(vars.id) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(vars.id) });
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+    },
+  });
+}
+
 export function useDeleteIssue() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

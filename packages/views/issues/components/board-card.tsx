@@ -26,6 +26,7 @@ import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { IssueLoopBrakeIndicator } from "./issue-loop-brake";
 import { useT } from "../../i18n";
 
 function formatDate(date: string): string {
@@ -185,6 +186,7 @@ export const BoardCardContent = memo(function BoardCardContent({
         <div className="flex items-center gap-1.5 min-w-0">
           {priorityIconNode}
           <p className="text-xs text-muted-foreground truncate">{issue.identifier}</p>
+          <IssueLoopBrakeIndicator issueId={issue.id} />
         </div>
         <IssueAgentActivityIndicator issueId={issue.id} />
       </div>

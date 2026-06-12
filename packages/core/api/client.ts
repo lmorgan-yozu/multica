@@ -1,6 +1,7 @@
 import type {
   Issue,
   IssueQualityGatesResponse,
+  IssueLoopBrake,
   CreateIssueRequest,
   UpdateIssueRequest,
   GroupedIssuesResponse,
@@ -168,6 +169,7 @@ import {
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_ISSUE_QUALITY_GATES_RESPONSE,
+  EMPTY_ISSUE_LOOP_BRAKE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_QUALITY_GATE_OVERRIDE_RESPONSE,
   EMPTY_SQUAD,
@@ -181,6 +183,7 @@ import {
   type AppConfigResponse,
   GroupedIssuesResponseSchema,
   IssueQualityGatesResponseSchema,
+  IssueLoopBrakeSchema,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
   QualityGateOverrideResponseSchema,
@@ -622,6 +625,23 @@ export class ApiClient {
     });
     return parseWithFallback(raw, QualityGateOverrideResponseSchema, EMPTY_QUALITY_GATE_OVERRIDE_RESPONSE, {
       endpoint: "POST /api/issues/:id/quality-gates/override",
+    });
+  }
+
+  async getIssueLoopBrake(id: string): Promise<IssueLoopBrake> {
+    const raw = await this.fetch<unknown>(`/api/issues/${id}/loop-brake`);
+    return parseWithFallback(raw, IssueLoopBrakeSchema, EMPTY_ISSUE_LOOP_BRAKE, {
+      endpoint: "GET /api/issues/:id/loop-brake",
+    });
+  }
+
+  async clearIssueLoopBrake(id: string, data: { reason?: string }): Promise<IssueLoopBrake> {
+    const raw = await this.fetch<unknown>(`/api/issues/${id}/loop-brake/clear`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueLoopBrakeSchema, EMPTY_ISSUE_LOOP_BRAKE, {
+      endpoint: "POST /api/issues/:id/loop-brake/clear",
     });
   }
 

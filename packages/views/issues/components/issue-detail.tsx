@@ -61,6 +61,7 @@ import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
 import { IssueSpendPanel } from "./issue-spend-panel";
+import { IssueLoopBrakePanel } from "./issue-loop-brake";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
@@ -1687,6 +1688,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         canOverride={currentUserRole === "owner" || currentUserRole === "admin"}
         getActorName={getActorName}
         t={t}
+      />
+
+      <IssueLoopBrakePanel
+        issueId={issue.id}
+        canClear={currentUserRole === "owner" || currentUserRole === "admin"}
       />
 
       {/* Parent issue — standalone section, only when the issue has a

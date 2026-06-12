@@ -197,6 +197,8 @@ vi.mock("../../projects/components/project-picker", () => ({
 const mockApiObj = vi.hoisted(() => ({
   getIssue: vi.fn(),
   getIssueQualityGates: vi.fn(),
+  getIssueLoopBrake: vi.fn().mockResolvedValue({ state: "clear" }),
+  clearIssueLoopBrake: vi.fn(),
   overrideIssueQualityGate: vi.fn(),
   listTimeline: vi.fn().mockResolvedValue([]),
   listComments: vi.fn().mockResolvedValue([]),

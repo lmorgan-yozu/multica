@@ -275,7 +275,7 @@ func (h *Handler) ExportTeamTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	manifest, buildErr := h.buildTeamTemplateManifest(r, wsUUID, req)
+	manifest, buildErr := h.buildTeamTemplateManifest(r, wsUUID, userID, req)
 	if buildErr != nil {
 		writeError(w, buildErr.status, buildErr.message)
 		return
@@ -393,7 +393,7 @@ type exportError struct {
 // whitelisted fields below are ever read into the manifest — custom_env,
 // custom_args, mcp_config, runtime IDs, and webhook tokens have no
 // destination field to land in (docs/adr/0002-team-templates.md).
-func (h *Handler) buildTeamTemplateManifest(r *http.Request, wsUUID pgtype.UUID, req ExportTeamTemplateRequest) (*teamtmpl.Manifest, *exportError) {
+func (h *Handler) buildTeamTemplateManifest(r *http.Request, wsUUID pgtype.UUID, userID string, req ExportTeamTemplateRequest) (*teamtmpl.Manifest, *exportError) {
 	ctx := r.Context()
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -495,6 +495,7 @@ func (h *Handler) buildTeamTemplateManifest(r *http.Request, wsUUID pgtype.UUID,
 		Skills:      skills,
 		Provenance: teamtmpl.Provenance{
 			SourceWorkspaceID: uuidToString(wsUUID),
+			ExportedBy:        userID,
 			ExportedAt:        now,
 		},
 	}

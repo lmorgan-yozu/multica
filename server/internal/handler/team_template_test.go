@@ -196,6 +196,13 @@ func TestExportTeamTemplateHappyPath(t *testing.T) {
 		t.Errorf("stored manifest does not validate: %v", err)
 	}
 
+	if m.Provenance.SourceWorkspaceID != testWorkspaceID {
+		t.Errorf("provenance source workspace = %q, want %q", m.Provenance.SourceWorkspaceID, testWorkspaceID)
+	}
+	if m.Provenance.ExportedBy != testUserID {
+		t.Errorf("provenance exported_by = %q, want %q", m.Provenance.ExportedBy, testUserID)
+	}
+
 	raw := string(resp.Version.Manifest)
 	// Sanitisation: secrets and instance wiring must never appear.
 	for _, banned := range []string{"tmpl-test-secret-value", "whk_super_secret_token_value", "custom_env", "runtime_id", "webhook_token"} {

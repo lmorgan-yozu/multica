@@ -323,6 +323,12 @@ func (m *Manifest) textLocations() []textLocation {
 			textLocation{"squad instructions", m.Squad.Instructions},
 		)
 	}
+	for _, wf := range m.Workflows {
+		locs = append(locs, textLocation{fmt.Sprintf("workflow %q description", wf.Name), wf.Description})
+		for _, st := range wf.Steps {
+			locs = append(locs, textLocation{fmt.Sprintf("workflow %q step %d name", wf.Name, st.Order), st.Name})
+		}
+	}
 	for _, ap := range m.Autopilots {
 		locs = append(locs,
 			textLocation{fmt.Sprintf("autopilot %q description", ap.Title), ap.Description},

@@ -47,6 +47,12 @@ func (m *Manifest) textPointers() []*string {
 	if m.Squad != nil {
 		ptrs = append(ptrs, &m.Squad.Description, &m.Squad.Instructions)
 	}
+	for i := range m.Workflows {
+		ptrs = append(ptrs, &m.Workflows[i].Description)
+		for j := range m.Workflows[i].Steps {
+			ptrs = append(ptrs, &m.Workflows[i].Steps[j].Name)
+		}
+	}
 	for i := range m.Autopilots {
 		ptrs = append(ptrs, &m.Autopilots[i].Description, &m.Autopilots[i].IssueTitleTemplate)
 	}

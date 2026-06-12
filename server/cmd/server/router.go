@@ -685,6 +685,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/rerun", h.RerunIssue)
 					r.Get("/task-runs", h.ListTasksByIssue)
 					r.Get("/usage", h.GetIssueUsage)
+					r.Get("/loop-brake", h.GetIssueLoopBrake)
+					r.Post("/loop-brake/clear", h.ClearIssueLoopBrake)
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
@@ -902,6 +904,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/runtime/daily", h.GetDashboardRunTimeDaily)
 			})
 			r.Get("/api/spend", h.GetSpendReport)
+			r.Get("/api/loop-brake/config", h.GetIssueLoopBrakeConfig)
+			r.Put("/api/loop-brake/config", h.UpsertIssueLoopBrakeConfig)
 
 			// Runtimes
 			r.Route("/api/runtimes", func(r chi.Router) {

@@ -28,6 +28,7 @@ import (
 type TaskService struct {
 	Queries   *db.Queries
 	TxStarter TxStarter
+	RawDB     db.DBTX
 	Hub       *realtime.Hub
 	Bus       *events.Bus
 	Analytics analytics.Client
@@ -112,7 +113,11 @@ func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.
 	if len(wakeups) > 0 {
 		wakeup = wakeups[0]
 	}
-	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup}
+	var raw db.DBTX
+	if dbtx, ok := tx.(db.DBTX); ok {
+		raw = dbtx
+	}
+	return &TaskService{Queries: q, TxStarter: tx, RawDB: raw, Hub: hub, Bus: bus, Wakeup: wakeup}
 }
 
 var trivialDoneMarkers = []string{
@@ -448,6 +453,10 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
 	}
+	if err := s.EnsureIssueBrakeAllowsEnqueue(ctx, issue.ID); err != nil {
+		slog.Warn("task enqueue blocked by issue loop brake", "issue_id", util.UUIDToString(issue.ID), "error", err)
+		return db.AgentTaskQueue{}, err
+	}
 
 	agent, err := s.Queries.GetAgent(ctx, issue.AssigneeID)
 	if err != nil {
@@ -512,6 +521,11 @@ func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Is
 }
 
 func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, forceFreshSession bool) (db.AgentTaskQueue, error) {
+	if err := s.EnsureIssueBrakeAllowsEnqueue(ctx, issue.ID); err != nil {
+		slog.Warn("mention task enqueue blocked by issue loop brake", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
+		return db.AgentTaskQueue{}, err
+	}
+
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -1153,6 +1167,9 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+	if _, err := s.EvaluateIssueLoopBrakeForTask(ctx, task); err != nil {
+		slog.Warn("issue loop brake evaluation failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", err)
+	}
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
@@ -1343,6 +1360,9 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
+	if _, err := s.EvaluateIssueLoopBrakeForTask(ctx, task); err != nil {
+		slog.Warn("issue loop brake evaluation failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", err)
+	}
 
 	// Auto-retry eligible failures (orphan, timeout, runtime_offline,
 	// runtime_recovery). The helper itself enforces attempt < max_attempts

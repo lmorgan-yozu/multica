@@ -200,7 +200,11 @@ FROM scoped_tasks
 GROUP BY %s, provider, model
 ORDER BY %s, provider NULLS LAST, model NULLS LAST`, groupSelect, groupBySQL, orderBySQL)
 
-	rows, err := h.DB.Query(ctx, sql, filters.workspaceID, filters.issueID, filters.agentID, filters.projectID, filters.from, filters.to, filters.tz)
+	args := []any{filters.workspaceID, filters.issueID, filters.agentID, filters.projectID, filters.from, filters.to}
+	if filters.groupBy == "day" {
+		args = append(args, filters.tz)
+	}
+	rows, err := h.DB.Query(ctx, sql, args...)
 	if err != nil {
 		return SpendReportResponse{}, err
 	}

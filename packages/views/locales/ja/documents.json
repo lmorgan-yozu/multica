@@ -1,0 +1,57 @@
+{
+  "comments": {
+    "title": "コメント",
+    "loading": "コメントを読み込み中...",
+    "empty": "まだコメントはありません。",
+    "author_agent": "エージェント",
+    "author_member": "メンバー",
+    "delete": "削除",
+    "delete_aria": "コメントを削除",
+    "placeholder": "コメントを追加...",
+    "posting": "投稿中...",
+    "post": "投稿"
+  },
+  "versions": {
+    "unavailable": "バージョンを利用できません: {{error}}",
+    "loading": "バージョンを読み込み中...",
+    "title": "バージョン",
+    "version_label": "v{{version}}",
+    "version_with_notes": "v{{version}}: {{notes}}",
+    "view": "表示",
+    "agent_suffix": "エージェント"
+  },
+  "viewer": {
+    "no_summary": "まだ要約はありません。",
+    "summarising": "要約中...",
+    "generate_summary": "要約を生成",
+    "summarise_empty_error": "要約できる内容がありません",
+    "load_failed": "ドキュメントの読み込みに失敗しました: {{error}}",
+    "download_instead": "代わりにダウンロード",
+    "loading": "読み込み中...",
+    "unsupported_type": "このドキュメント形式（{{type}}）はインラインプレビューに対応していません。",
+    "unknown_type": "不明",
+    "download_file": "{{filename}} をダウンロード",
+    "curated_by_agent": "エージェントが整理"
+  },
+  "library": {
+    "issue_title": "ドキュメント",
+    "project_title": "プロジェクトライブラリ",
+    "workspace_title": "ライブラリ",
+    "workspace_subtitle": "このワークスペースで作成されたすべてのもの",
+    "loading": "ライブラリを読み込み中...",
+    "load_failed": "ライブラリの読み込みに失敗しました: {{error}}",
+    "download_all_title": "すべてのドキュメントを zip でダウンロード",
+    "preparing": "準備中...",
+    "download_all": "すべてダウンロード",
+    "empty_title": "まだドキュメントはありません",
+    "empty_description": "Markdown、PDF、画像、テキストファイルをコメントにドロップするか、課題作成時に添付してください。ここにカテゴリ別で表示され、閲覧できます。",
+    "search_placeholder": "ドキュメントを検索",
+    "no_selected": "ドキュメントが選択されていません。",
+    "uncategorised": "未分類",
+    "pinned": "固定済み"
+  },
+  "tab": {
+    "label": "ライブラリ",
+    "open_aria_other": "ドキュメントライブラリを開く（{{count}} 件）"
+  }
+}

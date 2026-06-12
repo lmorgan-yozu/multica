@@ -1,0 +1,57 @@
+{
+  "comments": {
+    "title": "评论",
+    "loading": "正在加载评论...",
+    "empty": "还没有评论。",
+    "author_agent": "智能体",
+    "author_member": "成员",
+    "delete": "删除",
+    "delete_aria": "删除评论",
+    "placeholder": "添加评论...",
+    "posting": "正在发布...",
+    "post": "发布"
+  },
+  "versions": {
+    "unavailable": "版本不可用：{{error}}",
+    "loading": "正在加载版本...",
+    "title": "版本",
+    "version_label": "v{{version}}",
+    "version_with_notes": "v{{version}}：{{notes}}",
+    "view": "查看",
+    "agent_suffix": "智能体"
+  },
+  "viewer": {
+    "no_summary": "还没有摘要。",
+    "summarising": "正在生成摘要...",
+    "generate_summary": "生成摘要",
+    "summarise_empty_error": "没有可用于摘要的内容",
+    "load_failed": "加载文档失败：{{error}}",
+    "download_instead": "改为下载",
+    "loading": "正在加载...",
+    "unsupported_type": "此文档类型（{{type}}）没有内联预览。",
+    "unknown_type": "未知",
+    "download_file": "下载 {{filename}}",
+    "curated_by_agent": "由智能体整理"
+  },
+  "library": {
+    "issue_title": "文档",
+    "project_title": "项目文档库",
+    "workspace_title": "文档库",
+    "workspace_subtitle": "此工作区中生成的所有内容",
+    "loading": "正在加载文档库...",
+    "load_failed": "加载文档库失败：{{error}}",
+    "download_all_title": "以 zip 下载所有文档",
+    "preparing": "正在准备...",
+    "download_all": "全部下载",
+    "empty_title": "还没有文档",
+    "empty_description": "将 Markdown、PDF、图片或文本文件拖到评论中，或在创建议题时附加它们。它们会显示在这里，按类别分组，方便浏览。",
+    "search_placeholder": "搜索文档",
+    "no_selected": "未选择文档。",
+    "uncategorised": "未分类",
+    "pinned": "已固定"
+  },
+  "tab": {
+    "label": "文档库",
+    "open_aria_other": "打开文档库（{{count}} 个文档）"
+  }
+}

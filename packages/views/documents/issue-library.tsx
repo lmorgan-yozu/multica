@@ -7,6 +7,7 @@ import * as React from "react";
 import { useEffect, useState } from "react";
 import { api } from "@multica/core/api";
 import type { IssueLibrary as IssueLibraryData } from "@multica/core/types";
+import { useT } from "../i18n";
 import { LibraryShell } from "./library-shell";
 
 interface IssueLibraryProps {
@@ -17,6 +18,7 @@ interface IssueLibraryProps {
 }
 
 export function IssueLibrary({ issueId, title, subtitle }: IssueLibraryProps): React.JSX.Element {
+  const { t } = useT("documents");
   const [data, setData] = useState<IssueLibraryData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,12 +43,12 @@ export function IssueLibrary({ issueId, title, subtitle }: IssueLibraryProps): R
   }, [issueId]);
 
   if (loading) {
-    return <div className="p-6 text-sm text-muted-foreground">Loading library…</div>;
+    return <div className="p-6 text-sm text-muted-foreground">{t(($) => $.library.loading)}</div>;
   }
   if (error) {
     return (
       <div className="p-6 text-sm text-destructive">
-        Failed to load library: {error}
+        {t(($) => $.library.load_failed, { error })}
       </div>
     );
   }
@@ -54,7 +56,7 @@ export function IssueLibrary({ issueId, title, subtitle }: IssueLibraryProps): R
 
   return (
     <LibraryShell
-      title={title ?? "Documents"}
+      title={title ?? t(($) => $.library.issue_title)}
       subtitle={subtitle}
       documents={data.documents}
       sections={data.sections}

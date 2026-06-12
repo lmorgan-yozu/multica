@@ -70,7 +70,7 @@ issue_workflow_run(id, issue_id UNIQUE, workflow_id, current_step_id,
 Hooked in `UpdateIssue` and `BatchUpdateIssues` right after
 `notifyParentOfChildDone`, gated on `statusChanged`.
 
-## Structured handoff records (migration `118_issue_handoff`, ADA-18/ADA-23)
+## Structured handoff records (migration `119_issue_handoff`, ADA-18/ADA-23)
 
 Advancing a step writes an `issue_handoff` row — the source of truth for the
 transition; the system comment is only the timeline notification:

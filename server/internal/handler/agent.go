@@ -231,7 +231,7 @@ type AgentTaskResponse struct {
 	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
 	Kind                             string `json:"kind"` // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
 	// LatestHandoff is the most recent structured handoff record for the
-	// task's issue (see migration 118_issue_handoff), resolved at claim time
+	// task's issue (see migration 119_issue_handoff), resolved at claim time
 	// so the daemon can inject a concise "## Latest handoff" block into the
 	// agent brief without the agent trawling comments. Nil when the issue has
 	// no handoffs (the additive default) or the task has no issue; old

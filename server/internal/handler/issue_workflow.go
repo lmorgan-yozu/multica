@@ -142,7 +142,7 @@ func (h *Handler) advanceToStep(ctx context.Context, run db.IssueWorkflowRun, is
 }
 
 // recordWorkflowHandoff writes the structured handoff record for a workflow
-// advancement (see migration 118_issue_handoff). Like everything else on the
+// advancement (see migration 119_issue_handoff). Like everything else on the
 // advance path it is best-effort: errors are logged and swallowed, never
 // failing the user's status change.
 //

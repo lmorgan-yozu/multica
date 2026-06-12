@@ -210,6 +210,18 @@ const mockApiObj = vi.hoisted(() => ({
   unsubscribeFromIssue: vi.fn().mockResolvedValue(undefined),
   getActiveTasksForIssue: vi.fn().mockResolvedValue({ tasks: [] }),
   listTasksByIssue: vi.fn().mockResolvedValue([]),
+  getIssueUsage: vi.fn().mockResolvedValue({
+    total_input_tokens: 0,
+    total_output_tokens: 0,
+    total_cache_read_tokens: 0,
+    total_cache_write_tokens: 0,
+    task_count: 0,
+    usage_task_count: 0,
+    missing_usage_task_count: 0,
+    usage_status: "empty",
+    task_breakdown: [],
+    agent_breakdown: [],
+  }),
   listTaskMessages: vi.fn().mockResolvedValue([]),
   listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
   listIssues: vi.fn().mockResolvedValue({ issues: [], total: 0 }),
@@ -519,6 +531,18 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
     mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
     mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    mockApiObj.getIssueUsage.mockResolvedValue({
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      total_cache_read_tokens: 0,
+      total_cache_write_tokens: 0,
+      task_count: 0,
+      usage_task_count: 0,
+      missing_usage_task_count: 0,
+      usage_status: "empty",
+      task_breakdown: [],
+      agent_breakdown: [],
+    });
     mockApiObj.listMembers.mockResolvedValue([
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
     ]);
@@ -824,6 +848,140 @@ describe("IssueDetail (shared)", () => {
     // The "+ Add property" affordance is always offered while any
     // optional field is still hidden.
     expect(screen.getByText("Add property")).toBeInTheDocument();
+  });
+
+  it("shows issue spend totals and task/session breakdown", async () => {
+    mockApiObj.getIssueUsage.mockResolvedValue({
+      total_input_tokens: 1_000_000,
+      total_output_tokens: 500_000,
+      total_cache_read_tokens: 50_000,
+      total_cache_write_tokens: 25_000,
+      task_count: 1,
+      usage_task_count: 1,
+      missing_usage_task_count: 0,
+      usage_status: "complete",
+      task_breakdown: [
+        {
+          task_id: "task-usage-1",
+          session_id: "session-usage-1",
+          agent_id: "agent-1",
+          status: "completed",
+          provider: "openai",
+          model: "gpt-5-codex",
+          input_tokens: 1_000_000,
+          output_tokens: 500_000,
+          cache_read_tokens: 50_000,
+          cache_write_tokens: 25_000,
+          usage_status: "complete",
+        },
+      ],
+      agent_breakdown: [
+        {
+          agent_id: "agent-1",
+          provider: "openai",
+          model: "gpt-5-codex",
+          input_tokens: 1_000_000,
+          output_tokens: 500_000,
+          cache_read_tokens: 50_000,
+          cache_write_tokens: 25_000,
+          task_count: 1,
+          usage_task_count: 1,
+          missing_usage_task_count: 0,
+          usage_status: "complete",
+        },
+      ],
+    });
+    mockApiObj.listTasksByIssue.mockResolvedValue([
+      {
+        id: "task-usage-1",
+        agent_id: "agent-1",
+        runtime_id: "runtime-1",
+        issue_id: "issue-1",
+        status: "completed",
+        priority: 0,
+        dispatched_at: "2026-06-12T09:00:00Z",
+        started_at: "2026-06-12T09:01:00Z",
+        completed_at: "2026-06-12T09:05:00Z",
+        result: null,
+        error: null,
+        created_at: "2026-06-12T09:00:00Z",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    expect(await screen.findByText("Spend")).toBeInTheDocument();
+    expect(screen.getAllByText("$6.29").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("1.6M").length).toBeGreaterThan(0);
+    expect(screen.getByText("By agent")).toBeInTheDocument();
+    expect(screen.getAllByText("Claude Agent").length).toBeGreaterThan(0);
+    expect(screen.getByText("By session")).toBeInTheDocument();
+    expect(screen.getByText("Session session-")).toBeInTheDocument();
+    expect(screen.getAllByText("openai / gpt-5-codex").length).toBeGreaterThan(0);
+  });
+
+  it("distinguishes missing usage from zero-token usage", async () => {
+    mockApiObj.getIssueUsage.mockResolvedValue({
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      total_cache_read_tokens: 0,
+      total_cache_write_tokens: 0,
+      task_count: 2,
+      usage_task_count: 1,
+      missing_usage_task_count: 1,
+      usage_status: "partial",
+      task_breakdown: [
+        {
+          task_id: "task-zero",
+          session_id: null,
+          agent_id: "agent-1",
+          status: "completed",
+          provider: "openai",
+          model: "gpt-5-codex",
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          usage_status: "complete",
+        },
+        {
+          task_id: "task-missing",
+          session_id: null,
+          agent_id: "agent-1",
+          status: "completed",
+          provider: "",
+          model: "",
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          usage_status: "missing",
+        },
+      ],
+      agent_breakdown: [
+        {
+          agent_id: "agent-1",
+          provider: "openai",
+          model: "gpt-5-codex",
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          task_count: 2,
+          usage_task_count: 1,
+          missing_usage_task_count: 1,
+          usage_status: "partial",
+        },
+      ],
+    });
+
+    renderIssueDetail();
+
+    expect(await screen.findByText("1 of 2 runs have no usage row.")).toBeInTheDocument();
+    expect(screen.getByText("Task task-zer")).toBeInTheDocument();
+    expect(screen.getAllByText("0").length).toBeGreaterThan(0);
+    expect(screen.getByText("Task task-mis")).toBeInTheDocument();
+    expect(screen.getByText("Usage missing")).toBeInTheDocument();
   });
 
   it("hides every optional property row when none are set", async () => {

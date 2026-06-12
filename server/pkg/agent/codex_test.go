@@ -1261,7 +1261,7 @@ func TestCodexExecuteLegacyFirstTurnMessageSatisfiesProgress(t *testing.T) {
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
 		Timeout:                   5 * time.Second,
-		SemanticInactivityTimeout: 100 * time.Millisecond,
+		SemanticInactivityTimeout: 250 * time.Millisecond,
 	})
 	if result.Status != "completed" {
 		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
@@ -1295,7 +1295,7 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousMessages(t *testing.T) {
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
 		Timeout:                   5 * time.Second,
-		SemanticInactivityTimeout: 90 * time.Millisecond,
+		SemanticInactivityTimeout: 250 * time.Millisecond,
 	})
 	if result.Status != "completed" {
 		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)

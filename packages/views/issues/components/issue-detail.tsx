@@ -60,6 +60,7 @@ import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
+import { IssueSpendPanel } from "./issue-spend-panel";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
@@ -533,12 +534,6 @@ function formatActivity(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
 // Stable reference for threads with no replies. Inline `[]` would create a
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
 const EMPTY_REPLIES: TimelineEntry[] = [];
@@ -960,7 +955,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const [metadataOpen, setMetadataOpen] = useState(false);
-  const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
+  const [spendOpen, setSpendOpen] = useState(true);
   const githubSettings = useGitHubSettings();
 
   // Per-issue, per-session set of optional properties currently visible in
@@ -1767,39 +1762,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           when there are no runs to show. */}
       <ExecutionLogSection issueId={id} />
 
-      {/* Token usage */}
-      {usage && usage.task_count > 0 && (
-        <div>
-          <button
-            type="button"
-            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${tokenUsageOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-            onClick={() => setTokenUsageOpen(!tokenUsageOpen)}
-          >
-            {t(($) => $.detail.section_token_usage)}
-            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${tokenUsageOpen ? "rotate-90" : ""}`} />
-          </button>
-          {tokenUsageOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
-            <PropRow label={t(($) => $.detail.prop_input)}>
-              <span className="text-muted-foreground">{formatTokenCount(usage.total_input_tokens)}</span>
-            </PropRow>
-            <PropRow label={t(($) => $.detail.prop_output)}>
-              <span className="text-muted-foreground">{formatTokenCount(usage.total_output_tokens)}</span>
-            </PropRow>
-            {(usage.total_cache_read_tokens > 0 || usage.total_cache_write_tokens > 0) && (
-              <PropRow label={t(($) => $.detail.prop_cache)}>
-                <span className="text-muted-foreground">
-                  {t(($) => $.detail.prop_cache_value, {
-                    read: formatTokenCount(usage.total_cache_read_tokens),
-                    write: formatTokenCount(usage.total_cache_write_tokens),
-                  })}
-                </span>
-              </PropRow>
-            )}
-            <PropRow label={t(($) => $.detail.prop_runs)}>
-              <span className="text-muted-foreground">{usage.task_count}</span>
-            </PropRow>
-          </div>}
-        </div>
+      {usage && (
+        <IssueSpendPanel
+          issueId={id}
+          usage={usage}
+          open={spendOpen}
+          onOpenChange={setSpendOpen}
+        />
       )}
 
       {/* Metadata — agent-facing free-form KV bag. The values almost

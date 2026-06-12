@@ -9,6 +9,7 @@ import * as React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@multica/core/api";
 import type { DocumentComment } from "@multica/core/types";
+import { useT } from "../i18n";
 
 interface DocumentCommentsProps {
   attachmentId: string;
@@ -21,6 +22,7 @@ export function DocumentComments({
   currentUserId,
   className,
 }: DocumentCommentsProps): React.JSX.Element {
+  const { t } = useT("documents");
   const [comments, setComments] = useState<DocumentComment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -72,7 +74,7 @@ export function DocumentComments({
 
   return (
     <section className={className}>
-      <h3 className="mb-2 text-sm font-semibold">Comments</h3>
+      <h3 className="mb-2 text-sm font-semibold">{t(($) => $.comments.title)}</h3>
       {error && (
         <div className="mb-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
           {error}
@@ -80,16 +82,18 @@ export function DocumentComments({
       )}
 
       {comments === null ? (
-        <div className="text-xs text-muted-foreground">Loading comments…</div>
+        <div className="text-xs text-muted-foreground">{t(($) => $.comments.loading)}</div>
       ) : comments.length === 0 ? (
-        <div className="text-xs text-muted-foreground">No comments yet.</div>
+        <div className="text-xs text-muted-foreground">{t(($) => $.comments.empty)}</div>
       ) : (
         <ul className="flex flex-col gap-2">
           {comments.map((c) => (
             <li key={c.id} className="rounded-md border border-border bg-muted/30 p-2">
               <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
                 <span>
-                  {c.author_type === "agent" ? "🤖 agent" : "👤 member"}
+                  {c.author_type === "agent"
+                    ? `🤖 ${t(($) => $.comments.author_agent)}`
+                    : `👤 ${t(($) => $.comments.author_member)}`}
                   {" · "}
                   {new Date(c.created_at).toLocaleString()}
                 </span>
@@ -98,9 +102,9 @@ export function DocumentComments({
                     type="button"
                     className="rounded-md px-1.5 py-0.5 text-[10px] text-destructive hover:bg-destructive/10"
                     onClick={() => onDelete(c.id)}
-                    aria-label="Delete comment"
+                    aria-label={t(($) => $.comments.delete_aria)}
                   >
-                    Delete
+                    {t(($) => $.comments.delete)}
                   </button>
                 )}
               </div>
@@ -113,7 +117,7 @@ export function DocumentComments({
       <div className="mt-3 flex flex-col gap-2">
         <textarea
           className="min-h-[60px] w-full rounded-md border border-border bg-background p-2 text-sm outline-none focus:border-brand"
-          placeholder="Add a comment…"
+          placeholder={t(($) => $.comments.placeholder)}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           disabled={submitting}
@@ -125,7 +129,7 @@ export function DocumentComments({
             onClick={onSubmit}
             disabled={submitting || !draft.trim()}
           >
-            {submitting ? "Posting…" : "Post"}
+            {submitting ? t(($) => $.comments.posting) : t(($) => $.comments.post)}
           </button>
         </div>
       </div>

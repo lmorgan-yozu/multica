@@ -9,6 +9,7 @@ import * as React from "react";
 import { useMemo, useState } from "react";
 import { api } from "@multica/core/api";
 import type { Document, LibrarySection } from "@multica/core/types";
+import { useT } from "../i18n";
 import { DocumentViewer } from "./document-viewer";
 
 // DownloadAllButton does an authed GET of the export URL via the API
@@ -16,6 +17,7 @@ import { DocumentViewer } from "./document-viewer";
 // response and triggers a client-side download. A raw `<a href>` would
 // skip those headers and hit the workspace-required middleware with a 400.
 function DownloadAllButton({ url, filename }: { url: string; filename?: string }): React.JSX.Element {
+  const { t } = useT("documents");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,9 +48,9 @@ function DownloadAllButton({ url, filename }: { url: string; filename?: string }
         onClick={onClick}
         disabled={pending}
         className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-        title="Download all documents as a zip"
+        title={t(($) => $.library.download_all_title)}
       >
-        {pending ? "Preparing…" : "Download all"}
+        {pending ? t(($) => $.library.preparing) : t(($) => $.library.download_all)}
       </button>
       {error && <span className="text-[11px] text-destructive">{error}</span>}
     </div>
@@ -82,6 +84,7 @@ export function LibraryShell<D extends Document>({
   exportUrl,
   exportFilename,
 }: LibraryShellProps<D>): React.JSX.Element {
+  const { t } = useT("documents");
   const [selectedId, setSelectedId] = useState<string | null>(
     documents[0]?.attachment_id ?? null,
   );
@@ -99,7 +102,10 @@ export function LibraryShell<D extends Document>({
   // Build the nav tree. Sections are top-level folders; categories are
   // split on "/" so an agent can write `Research/Raw` and get a
   // nested folder in the UI. Uncategorised docs live in a trailing folder.
-  const tree = useMemo(() => buildTree(filteredDocuments, sections), [filteredDocuments, sections]);
+  const tree = useMemo(
+    () => buildTree(filteredDocuments, sections, t(($) => $.library.uncategorised)),
+    [filteredDocuments, sections, t],
+  );
 
   const selectedDoc = useMemo(
     () => documents.find((d) => d.attachment_id === selectedId) ?? null,
@@ -120,11 +126,10 @@ export function LibraryShell<D extends Document>({
       <div className="flex min-h-[60vh] items-center justify-center p-8 text-center">
         {emptyState ?? (
           <div className="max-w-md text-sm text-muted-foreground">
-            <h2 className="mb-2 text-base font-semibold text-foreground">No documents yet</h2>
-            <p>
-              Drop markdown, PDFs, images or text files onto a comment or attach them when you create
-              an issue. They&rsquo;ll appear here, grouped by category, ready to browse.
-            </p>
+            <h2 className="mb-2 text-base font-semibold text-foreground">
+              {t(($) => $.library.empty_title)}
+            </h2>
+            <p>{t(($) => $.library.empty_description)}</p>
           </div>
         )}
       </div>
@@ -145,7 +150,7 @@ export function LibraryShell<D extends Document>({
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search documents"
+          placeholder={t(($) => $.library.search_placeholder)}
           className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-brand"
         />
         <nav className="flex flex-col gap-0.5 overflow-y-auto pr-1 text-sm">
@@ -157,6 +162,7 @@ export function LibraryShell<D extends Document>({
               selectedId={selectedId}
               onSelect={setSelectedId}
               renderDocMeta={renderDocMeta}
+              pinnedLabel={t(($) => $.library.pinned)}
               // Expand the first two levels by default so the landing
               // view feels browseable; deeper nesting stays collapsed.
               defaultExpanded={true}
@@ -169,7 +175,7 @@ export function LibraryShell<D extends Document>({
           renderViewer ? renderViewer(selectedDoc) : <DocumentViewer document={selectedDoc} />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            No document selected.
+            {t(($) => $.library.no_selected)}
           </div>
         )}
       </section>
@@ -205,6 +211,7 @@ interface TreeNode<D extends Document> {
 function buildTree<D extends Document>(
   documents: D[],
   sections: LibrarySection[],
+  uncategorisedLabel: string,
 ): TreeNode<D>[] {
   const byId = new Map(documents.map((d) => [d.attachment_id, d]));
   const claimed = new Set<string>();
@@ -254,7 +261,7 @@ function buildTree<D extends Document>(
   if (uncategorised.length > 0) {
     roots.push({
       path: "cat:__uncategorised",
-      name: "Uncategorised",
+      name: uncategorisedLabel,
       children: [],
       docs: uncategorised,
     });
@@ -315,6 +322,7 @@ function TreeFolder<D extends Document>({
   selectedId,
   onSelect,
   renderDocMeta,
+  pinnedLabel,
   defaultExpanded,
 }: {
   node: TreeNode<D>;
@@ -322,6 +330,7 @@ function TreeFolder<D extends Document>({
   selectedId: string | null;
   onSelect: (id: string) => void;
   renderDocMeta?: (doc: D) => React.ReactNode;
+  pinnedLabel: string;
   defaultExpanded: boolean;
 }): React.JSX.Element {
   // Default expanded for depth 0 (top-level) and depth 1; deeper levels
@@ -365,6 +374,7 @@ function TreeFolder<D extends Document>({
               selectedId={selectedId}
               onSelect={onSelect}
               renderDocMeta={renderDocMeta}
+              pinnedLabel={pinnedLabel}
               defaultExpanded={defaultExpanded}
             />
           ))}
@@ -376,6 +386,7 @@ function TreeFolder<D extends Document>({
               active={doc.attachment_id === selectedId}
               onSelect={onSelect}
               renderDocMeta={renderDocMeta}
+              pinnedLabel={pinnedLabel}
             />
           ))}
         </div>
@@ -390,12 +401,14 @@ function TreeLeaf<D extends Document>({
   active,
   onSelect,
   renderDocMeta,
+  pinnedLabel,
 }: {
   doc: D;
   depth: number;
   active: boolean;
   onSelect: (id: string) => void;
   renderDocMeta?: (doc: D) => React.ReactNode;
+  pinnedLabel: string;
 }): React.JSX.Element {
   const label = doc.title ?? doc.filename;
   return (
@@ -409,7 +422,7 @@ function TreeLeaf<D extends Document>({
       style={{ paddingLeft: `${depth * 12 + 20}px` }}
     >
       <span className="flex w-full items-center gap-2">
-        {doc.pinned && <span aria-label="pinned">📌</span>}
+        {doc.pinned && <span aria-label={pinnedLabel}>📌</span>}
         <span className="truncate">{label}</span>
       </span>
       {renderDocMeta && (

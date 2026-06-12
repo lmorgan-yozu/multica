@@ -507,6 +507,14 @@ func (h *Handler) OverrideIssueQualityGate(w http.ResponseWriter, r *http.Reques
 	if issue.Status == "cancelled" {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 	}
+	if prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
+		if h.isAgentAssigneeReady(r.Context(), issue) {
+			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+		}
+		if h.isSquadLeaderReady(r.Context(), issue) {
+			h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
+		}
+	}
 	h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
 	h.advanceWorkflowOnStatusChange(r.Context(), prevIssue, issue, actorType, actorID)
 

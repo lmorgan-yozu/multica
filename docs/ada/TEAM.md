@@ -17,13 +17,16 @@ Engineers and QA are additionally bound to the `tdd` skill.
 
 | Role | Model / runtime | Purpose |
 | --- | --- | --- |
-| Product Owner | gpt-5.5 (Codex) | Owns the backlog and acceptance against the vision docs; casting vote on product intent |
-| Delivery Lead | gpt-5.5 (Codex) | Flow, risk, and status; squad leader; watches for stalls and token burn |
-| Tech Lead | gpt-5.5 (Codex) | Technical direction and breakdown; casting vote on technical deadlocks |
+| Product Owner | pro (Gemini) | Direction/PM-shaped thinking; owns the backlog and acceptance against the vision docs; casting vote on product intent |
+| UX/UI Designer | pro (Gemini) | Direction/PM-shaped thinking; design direction and user experience |
+| Delivery Lead | gpt-5.5 (Codex) | Flow, risk, and status; squad leader (conductor); watches for stalls and token burn; cap-proof reliability |
+| Tech Lead | claude-fable-5 (Claude) | Technical direction and breakdown; casting vote on technical deadlocks; second-line on Fable |
+| Tech Lead (Codex) | gpt-5.5 (Codex) | Understudy for cap overflow |
 | Backend Engineer | gpt-5.5 (Codex) | Go server, schema, API, daemon/CLI |
 | Frontend Engineer | gpt-5.5 (Codex) | Next.js web app |
 | Fable Engineer (HIGH COST) | claude-fable-5 (Claude) | Complex, ambiguous, cross-cutting work only — Tech Lead must justify its use |
-| Code Reviewer | claude-fable-5 (Claude) | Primary quality gate; deliberately a different provider from the implementing engineers |
+| Code Reviewer | claude-4.6-sonnet (Claude) | Frequent-deep reviews; primary quality gate (preserves Fable cap for the deepest work) |
+| Code Reviewer (Codex) | gpt-5.5 (Codex) | Understudy for cap overflow |
 | QA Engineer | gpt-5.5 (Codex) | Verification against acceptance criteria; release-readiness casting vote |
 | Security Reviewer | claude-fable-5 (Claude) | Auth, tenant isolation, secrets, untrusted input; verdict is a veto |
 | DevOps Engineer | gpt-5.5 (Codex) | Builds and deploys to staging; prod is always human-gated |
@@ -42,6 +45,11 @@ Engineer (in_progress → in_review, reassign Code Reviewer)
         → DevOps (staging deploy + checks; prod prepared, human executes)
 Security Reviewer: on referral, anywhere in the chain; their no is final.
 ```
+
+### Model Policy
+- **Claude Fable & Sonnet 4.6**: Used for deep thinking and deep implementation. Fable handles the deepest work (architecture, ambiguity, cross-cutting) and Tech Lead duties. Sonnet 4.6 handles frequent-deep work like code review, preserving the shared Anthropic cap.
+- **Codex**: Used for well-specified implementation and roles needing cap-proof reliability (e.g., conductor/Delivery Lead, and understudies for Claude roles to handle cap overflow).
+- **Gemini (pro)**: Used for direction and PM-shaped thinking (Product Owner, UX/UI design, Technical Writer).
 
 Cross-provider review is deliberate: Codex-implemented work is reviewed by
 a Claude agent, mirroring the practice described in the Arcus Q&R.

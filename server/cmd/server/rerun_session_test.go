@@ -405,7 +405,7 @@ func TestRerunIssueSetsForceFreshSession(t *testing.T) {
 	hub := realtime.NewHub()
 	go hub.Run()
 	bus := events.New()
-	taskService := service.NewTaskService(queries, nil, hub, bus)
+	taskService := service.NewTaskService(queries, testPool, hub, bus)
 
 	task, err := taskService.RerunIssue(ctx, pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true}, pgtype.UUID{}, pgtype.UUID{})
 	if err != nil {
@@ -475,7 +475,7 @@ func TestRerunIssueTargetsSourceTaskAgent(t *testing.T) {
 	hub := realtime.NewHub()
 	go hub.Run()
 	bus := events.New()
-	taskService := service.NewTaskService(queries, nil, hub, bus)
+	taskService := service.NewTaskService(queries, testPool, hub, bus)
 
 	task, err := taskService.RerunIssue(
 		ctx,
@@ -546,7 +546,7 @@ func TestRerunIssueRejectsCrossIssueTask(t *testing.T) {
 	hub := realtime.NewHub()
 	go hub.Run()
 	bus := events.New()
-	taskService := service.NewTaskService(queries, nil, hub, bus)
+	taskService := service.NewTaskService(queries, testPool, hub, bus)
 
 	_, err := taskService.RerunIssue(
 		ctx,
@@ -609,7 +609,7 @@ func TestRerunIssueInheritsTriggerCommentFromSourceTask(t *testing.T) {
 	hub := realtime.NewHub()
 	go hub.Run()
 	bus := events.New()
-	taskService := service.NewTaskService(queries, nil, hub, bus)
+	taskService := service.NewTaskService(queries, testPool, hub, bus)
 
 	task, err := taskService.RerunIssue(
 		ctx,
@@ -648,7 +648,7 @@ func TestEnqueueTaskForIssueDoesNotForceFreshSession(t *testing.T) {
 	hub := realtime.NewHub()
 	go hub.Run()
 	bus := events.New()
-	taskService := service.NewTaskService(queries, nil, hub, bus)
+	taskService := service.NewTaskService(queries, testPool, hub, bus)
 
 	issue, err := queries.GetIssue(ctx, pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true})
 	if err != nil {

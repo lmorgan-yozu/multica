@@ -80,12 +80,36 @@ type Task struct {
 	// when description is empty so the agent doesn't see a useless heading.
 	RequestingUserName               string `json:"requesting_user_name,omitempty"`
 	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
+	// LatestHandoff is the most recent structured handoff record for the
+	// task's issue, resolved server-side at claim time (mirrors
+	// handler.TaskHandoffData). BuildPrompt renders it as a "## Latest
+	// handoff" block in direct and comment-triggered issue prompts. Nil when
+	// the issue has no handoffs or the server pre-dates the field — prompts
+	// are unchanged in that case.
+	LatestHandoff *HandoffData `json:"latest_handoff,omitempty"`
 	// AuthToken is the task-scoped credential the server mints at claim time.
 	// The daemon injects it into the spawned agent as MULTICA_TOKEN so the
 	// agent never sees the daemon's own (often workspace-owner) credential.
 	// Empty when the server-side runtime has no owning user — the daemon
 	// then falls back to its own token. See MUL-2600.
 	AuthToken string `json:"auth_token,omitempty"`
+}
+
+// HandoffData is the latest structured handoff for the task's issue, as
+// delivered by the claim endpoint (JSON field names match
+// handler.TaskHandoffData). Names are resolved server-side because the
+// daemon has no lookup path of its own.
+type HandoffData struct {
+	ID               string `json:"id"`
+	CreatedAt        string `json:"created_at"`
+	AuthorType       string `json:"author_type,omitempty"`
+	AuthorName       string `json:"author_name,omitempty"`
+	NextAssigneeType string `json:"next_assignee_type,omitempty"`
+	NextAssigneeName string `json:"next_assignee_name,omitempty"`
+	WorkCompleted    string `json:"work_completed,omitempty"`
+	WorkRemaining    string `json:"work_remaining,omitempty"`
+	DecisionsMade    string `json:"decisions_made,omitempty"`
+	Uncertainties    string `json:"uncertainties,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

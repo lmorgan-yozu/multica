@@ -125,6 +125,11 @@ func (h *Handler) advanceToStep(ctx context.Context, run db.IssueWorkflowRun, is
 		"prev_status":        issue.Status,
 	})
 
+	// Record the structured handoff before posting the comment: the handoff
+	// row is the source of truth for the transition; the system comment is
+	// only the timeline notification.
+	h.recordWorkflowHandoff(ctx, run, updated, prevStep, nextStep)
+
 	mention := h.buildAgentMention(ctx, updated.WorkspaceID, nextStep.AgentID)
 	content := fmt.Sprintf(
 		"%sWorkflow handoff: %s is done. You're up next for %s. The full context is in this issue's thread and history.",
@@ -134,6 +139,73 @@ func (h *Handler) advanceToStep(ctx context.Context, run db.IssueWorkflowRun, is
 
 	// Trigger the next agent, mirroring the child-done dispatch guards.
 	h.triggerWorkflowAgent(ctx, updated, nextStep.AgentID, comment)
+}
+
+// recordWorkflowHandoff writes the structured handoff record for a workflow
+// advancement (see migration 119_issue_handoff). Like everything else on the
+// advance path it is best-effort: errors are logged and swallowed, never
+// failing the user's status change.
+//
+// Two shapes, so the issue's latest handoff stays the richest one:
+//   - The outgoing agent already wrote its own handoff for this stint (the
+//     issue's latest handoff is authored by the outgoing step's agent and not
+//     yet linked to any workflow run): adopt it — stamp the run/step linkage
+//     and the workflow's routing decision onto that record rather than
+//     inserting a thin duplicate that would shadow it as "latest".
+//   - Otherwise: insert a synthesized record carrying the facts the workflow
+//     knows — author (outgoing step's agent), next assignee (next step's
+//     agent), run/step linkage, and the outgoing agent's task where available.
+func (h *Handler) recordWorkflowHandoff(ctx context.Context, run db.IssueWorkflowRun, issue db.Issue, prevStep, nextStep db.WorkflowStep) {
+	taskID, err := h.Queries.GetLatestTaskIDForIssueAndAgent(ctx, db.GetLatestTaskIDForIssueAndAgentParams{
+		IssueID: issue.ID,
+		AgentID: prevStep.AgentID,
+	})
+	if err != nil {
+		taskID = pgtype.UUID{Valid: false} // no task linkage — fine
+	}
+
+	nextAssigneeType := pgtype.Text{String: "agent", Valid: true}
+
+	latest, err := h.Queries.GetLatestIssueHandoff(ctx, db.GetLatestIssueHandoffParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     issue.ID,
+	})
+	if err == nil && !latest.WorkflowRunID.Valid &&
+		latest.AuthorType.Valid && latest.AuthorType.String == "agent" &&
+		latest.AuthorID == prevStep.AgentID {
+		_, linkErr := h.Queries.LinkIssueHandoffToWorkflow(ctx, db.LinkIssueHandoffToWorkflowParams{
+			ID:               latest.ID,
+			WorkflowRunID:    run.ID,
+			WorkflowStepID:   prevStep.ID,
+			NextAssigneeType: nextAssigneeType,
+			NextAssigneeID:   nextStep.AgentID,
+			TaskID:           taskID,
+		})
+		if linkErr == nil {
+			return
+		}
+		slog.Warn("workflow advance: link agent handoff to workflow failed, inserting synthesized record",
+			"error", linkErr, "handoff_id", uuidToString(latest.ID), "run_id", uuidToString(run.ID))
+	}
+
+	if _, err := h.Queries.CreateIssueHandoff(ctx, db.CreateIssueHandoffParams{
+		WorkspaceID:      issue.WorkspaceID,
+		IssueID:          issue.ID,
+		TaskID:           taskID,
+		AuthorType:       pgtype.Text{String: "agent", Valid: true},
+		AuthorID:         prevStep.AgentID,
+		NextAssigneeType: nextAssigneeType,
+		NextAssigneeID:   nextStep.AgentID,
+		WorkflowRunID:    run.ID,
+		WorkflowStepID:   prevStep.ID,
+		WorkCompleted:    fmt.Sprintf("%s is done — the issue reached %q and the workflow advanced.", stepLabel(prevStep), prevStep.AdvanceStatus),
+		WorkRemaining:    fmt.Sprintf("%s is next. The work itself is defined by the issue description and comment thread.", stepLabel(nextStep)),
+		DecisionsMade:    "",
+		Uncertainties:    "",
+	}); err != nil {
+		slog.Warn("workflow advance: create handoff record failed",
+			"error", err, "issue_id", uuidToString(issue.ID), "run_id", uuidToString(run.ID))
+	}
 }
 
 // triggerWorkflowAgent enqueues a task for the next step's agent, applying the

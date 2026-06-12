@@ -32,7 +32,61 @@ func BuildPrompt(task Task, provider string) string {
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). On long-running issues use `--recent 20 --output json` to read the 20 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
+	appendLatestHandoffSection(&b, task.LatestHandoff, false)
 	return b.String()
+}
+
+// appendLatestHandoffSection renders the latest structured handoff for the
+// task's issue into the prompt. asBackground=true is the comment-triggered
+// variant: the block must read as issue state, never displacing the
+// triggering comment as the task. Empty content fields are skipped; a nil
+// handoff writes nothing, preserving today's prompts exactly (ADA-23's
+// additive guarantee).
+func appendLatestHandoffSection(b *strings.Builder, h *HandoffData, asBackground bool) {
+	if h == nil {
+		return
+	}
+	b.WriteString("\n## Latest handoff\n\n")
+	from := handoffActorLabel(h.AuthorType, h.AuthorName)
+	intro := fmt.Sprintf("The most recent structured handoff recorded for this issue (by %s", from)
+	if h.NextAssigneeType != "" {
+		intro += fmt.Sprintf(", next assignee %s", handoffActorLabel(h.NextAssigneeType, h.NextAssigneeName))
+	}
+	if h.CreatedAt != "" {
+		intro += fmt.Sprintf(", at %s", h.CreatedAt)
+	}
+	intro += "):\n\n"
+	b.WriteString(intro)
+	for _, f := range []struct{ label, value string }{
+		{"Work completed:", h.WorkCompleted},
+		{"Work remaining:", h.WorkRemaining},
+		{"Decisions made:", h.DecisionsMade},
+		{"Uncertainties:", h.Uncertainties},
+	} {
+		if strings.TrimSpace(f.value) == "" {
+			continue
+		}
+		fmt.Fprintf(b, "**%s** %s\n\n", f.label, f.value)
+	}
+	if asBackground {
+		b.WriteString("This handoff is background issue state only — the triggering comment above is what you must act on. Comments newer than this handoff take precedence over it.\n\n")
+	} else {
+		b.WriteString("Use this handoff as your starting context. Still verify it against the issue's latest comments — anything newer than this handoff takes precedence.\n")
+	}
+}
+
+// handoffActorLabel renders an actor reference for the handoff block, e.g.
+// `agent "Code Reviewer"`, falling back to the bare type or "unknown" when
+// the server couldn't resolve a display name.
+func handoffActorLabel(actorType, name string) string {
+	switch {
+	case actorType != "" && name != "":
+		return fmt.Sprintf("%s %q", actorType, name)
+	case actorType != "":
+		return actorType
+	default:
+		return "unknown"
+	}
 }
 
 // buildQuickCreatePrompt constructs a prompt for quick-create tasks. The
@@ -174,6 +228,10 @@ func buildCommentPrompt(task Task, provider string) string {
 	} else {
 		fmt.Fprintf(&b, "Read the discussion: `multica issue comment list %s --output json` (long issue? use `--recent 20`).\n\n", task.IssueID)
 	}
+	// Latest handoff goes AFTER the trigger block and reading hints: for
+	// comment-triggered follow-ups it is useful issue state, but it must
+	// never hide or outrank the triggering comment.
+	appendLatestHandoffSection(&b, task.LatestHandoff, true)
 	b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
 	return b.String()
 }

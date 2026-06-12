@@ -674,6 +674,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)
+					r.Post("/handoffs", h.CreateHandoff)
+					r.Get("/handoffs", h.ListHandoffs)
 					r.Get("/timeline", h.ListTimeline)
 					r.Get("/subscribers", h.ListIssueSubscribers)
 					r.Post("/subscribe", h.SubscribeToIssue)
@@ -683,6 +685,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/rerun", h.RerunIssue)
 					r.Get("/task-runs", h.ListTasksByIssue)
 					r.Get("/usage", h.GetIssueUsage)
+					r.Get("/loop-brake", h.GetIssueLoopBrake)
+					r.Post("/loop-brake/clear", h.ClearIssueLoopBrake)
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
@@ -836,6 +840,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/reactions", h.AddReaction)
 				r.Delete("/reactions", h.RemoveReaction)
 			})
+			r.Get("/api/handoffs/{id}", h.GetHandoff)
 
 			// Agents
 			r.Route("/api/agents", func(r chi.Router) {
@@ -899,6 +904,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/runtime/daily", h.GetDashboardRunTimeDaily)
 			})
 			r.Get("/api/spend", h.GetSpendReport)
+			r.Get("/api/loop-brake/config", h.GetIssueLoopBrakeConfig)
+			r.Put("/api/loop-brake/config", h.UpsertIssueLoopBrakeConfig)
 
 			// Runtimes
 			r.Route("/api/runtimes", func(r chi.Router) {

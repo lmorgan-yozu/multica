@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -206,6 +207,37 @@ func TestWorkflowHandoffEndToEnd(t *testing.T) {
 		t.Fatalf("expected a handoff comment mentioning agent B")
 	}
 
+	// Advancing must also write the structured handoff record (ADA-23):
+	// author = outgoing step's agent, next assignee = next step's agent,
+	// linked to the run and the completed step. The system comment above is
+	// the timeline notification; this row is the source of truth.
+	var (
+		hAuthorType, hNextType, hWorkCompleted, hWorkRemaining string
+		hAuthorID, hNextID, hRunID, hStepID                    string
+	)
+	if err := testPool.QueryRow(ctx, `
+		SELECT author_type, author_id::text, next_assignee_type, next_assignee_id::text,
+		       workflow_run_id::text, workflow_step_id::text, work_completed, work_remaining
+		FROM issue_handoff WHERE issue_id = $1`, issue.ID,
+	).Scan(&hAuthorType, &hAuthorID, &hNextType, &hNextID, &hRunID, &hStepID, &hWorkCompleted, &hWorkRemaining); err != nil {
+		t.Fatalf("expected a structured handoff record after advancement: %v", err)
+	}
+	if hAuthorType != "agent" || hAuthorID != agentA {
+		t.Fatalf("handoff author = %s/%s, want agent/%s", hAuthorType, hAuthorID, agentA)
+	}
+	if hNextType != "agent" || hNextID != agentB {
+		t.Fatalf("handoff next assignee = %s/%s, want agent/%s", hNextType, hNextID, agentB)
+	}
+	if hRunID != uuidToString(run.ID) {
+		t.Fatalf("handoff workflow_run_id = %s, want %s", hRunID, uuidToString(run.ID))
+	}
+	if hStepID != uuidToString(stepA.ID) {
+		t.Fatalf("handoff workflow_step_id = %s, want completed step %s", hStepID, uuidToString(stepA.ID))
+	}
+	if hWorkCompleted == "" || hWorkRemaining == "" {
+		t.Fatalf("synthesized handoff content must not be empty: completed=%q remaining=%q", hWorkCompleted, hWorkRemaining)
+	}
+
 	// Agent B finishes the final step: move to in_review again. The run should
 	// complete and the issue should stay in_review as a human review gate.
 	w = httptest.NewRecorder()
@@ -232,6 +264,16 @@ func TestWorkflowHandoffEndToEnd(t *testing.T) {
 	}
 	if uuidToString(final.AssigneeID) != agentB {
 		t.Fatalf("expected issue still assigned to agent B at the gate")
+	}
+
+	// Run completion is a human review gate, not a handoff — no second
+	// handoff record may appear for the final step.
+	var handoffCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue_handoff WHERE issue_id = $1`, issue.ID).Scan(&handoffCount); err != nil {
+		t.Fatalf("count handoffs: %v", err)
+	}
+	if handoffCount != 1 {
+		t.Fatalf("expected exactly 1 handoff record after run completion, got %d", handoffCount)
 	}
 }
 
@@ -318,5 +360,125 @@ func TestBindIssueWorkflowHandler(t *testing.T) {
 	testHandler.BindIssueWorkflow(w, req)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("second bind: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestWorkflowAdvanceAdoptsAgentAuthoredHandoff verifies the dedupe path:
+// when the outgoing agent already wrote its own structured handoff for the
+// issue (unlinked to any workflow run), advancing must stamp the workflow
+// linkage and routing decision onto THAT record instead of inserting a thin
+// synthesized duplicate that would shadow it as the issue's latest handoff.
+func TestWorkflowAdvanceAdoptsAgentAuthoredHandoff(t *testing.T) {
+	ctx := context.Background()
+	q := testHandler.Queries
+
+	agentA := createHandlerTestAgent(t, "wf-adopt-A "+time.Now().Format(time.RFC3339Nano), nil)
+	agentB := createHandlerTestAgent(t, "wf-adopt-B "+time.Now().Format(time.RFC3339Nano), nil)
+
+	wf, err := q.CreateWorkflow(ctx, db.CreateWorkflowParams{
+		WorkspaceID:   parseUUID(testWorkspaceID),
+		Name:          "wf adopt " + time.Now().Format(time.RFC3339Nano),
+		Description:   "",
+		CreatedByType: "member",
+		CreatedByID:   parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM workflow WHERE id = $1`, uuidToString(wf.ID)) })
+
+	stepA, err := q.CreateWorkflowStep(ctx, db.CreateWorkflowStepParams{
+		WorkflowID: wf.ID, StepOrder: 1, AgentID: parseUUID(agentA),
+		Name: "Build", StartStatus: "todo", AdvanceStatus: "in_review",
+	})
+	if err != nil {
+		t.Fatalf("create step A: %v", err)
+	}
+	if _, err := q.CreateWorkflowStep(ctx, db.CreateWorkflowStepParams{
+		WorkflowID: wf.ID, StepOrder: 2, AgentID: parseUUID(agentB),
+		Name: "Review", StartStatus: "todo", AdvanceStatus: "in_review",
+	}); err != nil {
+		t.Fatalf("create step B: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "wf adopt issue " + time.Now().Format(time.RFC3339Nano),
+		"status": "todo",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create issue: %d %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issue.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issue.ID)
+	})
+	if _, err := testPool.Exec(ctx,
+		`UPDATE issue SET assignee_type='agent', assignee_id=$2, status='in_progress' WHERE id=$1`,
+		issue.ID, agentA); err != nil {
+		t.Fatalf("seed assignee: %v", err)
+	}
+	run, err := q.CreateIssueWorkflowRun(ctx, db.CreateIssueWorkflowRunParams{
+		IssueID: parseUUID(issue.ID), WorkflowID: wf.ID, CurrentStepID: stepA.ID,
+	})
+	if err != nil {
+		t.Fatalf("bind run: %v", err)
+	}
+
+	// The outgoing agent records its own handoff before flipping the status —
+	// the shape ADA-22's CLI will produce.
+	authored, err := q.CreateIssueHandoff(ctx, db.CreateIssueHandoffParams{
+		WorkspaceID:   parseUUID(testWorkspaceID),
+		IssueID:       parseUUID(issue.ID),
+		AuthorType:    pgtype.Text{String: "agent", Valid: true},
+		AuthorID:      parseUUID(agentA),
+		WorkCompleted: "Implemented the vertical slice.",
+		WorkRemaining: "Review the diff.",
+		DecisionsMade: "Kept the join table.",
+		Uncertainties: "",
+	})
+	if err != nil {
+		t.Fatalf("create agent-authored handoff: %v", err)
+	}
+
+	// Agent A finishes: the advance should adopt the authored record.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{"status": "in_review"})
+	req = withURLParam(req, "id", issue.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update->in_review: %d %s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue_handoff WHERE issue_id = $1`, issue.ID).Scan(&count); err != nil {
+		t.Fatalf("count handoffs: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected the authored handoff to be adopted, not duplicated; got %d records", count)
+	}
+
+	var (
+		gotRunID, gotStepID, gotNextType, gotNextID string
+		gotCompleted                                string
+	)
+	if err := testPool.QueryRow(ctx, `
+		SELECT workflow_run_id::text, workflow_step_id::text, next_assignee_type, next_assignee_id::text, work_completed
+		FROM issue_handoff WHERE id = $1`, uuidToString(authored.ID),
+	).Scan(&gotRunID, &gotStepID, &gotNextType, &gotNextID, &gotCompleted); err != nil {
+		t.Fatalf("reload authored handoff: %v", err)
+	}
+	if gotRunID != uuidToString(run.ID) || gotStepID != uuidToString(stepA.ID) {
+		t.Fatalf("authored handoff linkage = run %s step %s, want run %s step %s",
+			gotRunID, gotStepID, uuidToString(run.ID), uuidToString(stepA.ID))
+	}
+	if gotNextType != "agent" || gotNextID != agentB {
+		t.Fatalf("authored handoff next assignee = %s/%s, want agent/%s", gotNextType, gotNextID, agentB)
+	}
+	if gotCompleted != "Implemented the vertical slice." {
+		t.Fatalf("authored handoff content must be preserved, got %q", gotCompleted)
 	}
 }

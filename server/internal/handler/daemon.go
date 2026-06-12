@@ -1246,6 +1246,12 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
+
+			// Attach the latest structured handoff for this issue so the
+			// daemon can inject it into the agent brief (ADA-23). Scoped by
+			// (workspace_id, issue_id) inside the lookup, best-effort, and
+			// nil when the issue has no handoffs — the additive default.
+			resp.LatestHandoff = h.latestHandoffTaskData(r.Context(), issue.WorkspaceID, issue.ID)
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it

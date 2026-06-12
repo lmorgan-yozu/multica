@@ -176,6 +176,7 @@ type AgentTaskResponse struct {
 	Result           any                   `json:"result"`
 	Error            *string               `json:"error"`
 	FailureReason    string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	ResumeAt         *string               `json:"resume_at,omitempty"`      // ADA-44: cap-resume schedule for provider-cap failures; null otherwise
 	Attempt          int32                 `json:"attempt"`
 	MaxAttempts      int32                 `json:"max_attempts"`
 	ParentTaskID     *string               `json:"parent_task_id,omitempty"`
@@ -300,6 +301,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		Result:           result,
 		Error:            textToPtr(t.Error),
 		FailureReason:    failureReason,
+		ResumeAt:         timestampToPtr(t.ResumeAt),
 		Attempt:          t.Attempt,
 		MaxAttempts:      t.MaxAttempts,
 		ParentTaskID:     uuidToPtr(t.ParentTaskID),

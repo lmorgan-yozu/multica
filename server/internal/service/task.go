@@ -1349,11 +1349,18 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// and only triggers for issue/chat tasks.
 	retried, _ := s.MaybeRetryFailedTask(ctx, task)
 
+	// ADA-44: provider-cap failures get a resume schedule and one
+	// plain-language system comment instead of the raw error dump below.
+	// Best-effort — a false return means "behave exactly as today".
+	// Cap reasons are never in retryableReasons, so this cannot race the
+	// auto-retry above.
+	capHandled := s.maybeScheduleCapResume(ctx, task, failureReason, errMsg)
+
 	// Skip the per-failure system comment when we'll immediately retry —
 	// the new task will surface its own status to the user, and we don't
 	// want to spam the issue with "task timed out" messages on every
 	// daemon hiccup.
-	if errMsg != "" && task.IssueID.Valid && retried == nil {
+	if errMsg != "" && task.IssueID.Valid && retried == nil && !capHandled {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
 	}
 

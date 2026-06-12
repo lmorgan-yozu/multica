@@ -68,6 +68,9 @@ export function onIssueUpdated(
   if (issue.status !== undefined || issue.project_id !== undefined) {
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
   }
+  if (issue.project_id) {
+    qc.invalidateQueries({ queryKey: projectKeys.roadmapAll(wsId) });
+  }
   // Any field change can shift Gantt membership — start_date / due_date may
   // have moved in or out of the `scheduled` set, project_id may have
   // changed, or the row that is in the cache may need to mirror updated

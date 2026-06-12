@@ -6,6 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // Integration tests for the roadmap endpoints against the real test
@@ -112,6 +116,21 @@ func addDependencyViaAPI(t *testing.T, issueID, dependsOnID string) *httptest.Re
 	return w
 }
 
+func waitForIssueUpdatedEvent(t *testing.T, ch <-chan events.Event) map[string]any {
+	t.Helper()
+	select {
+	case e := <-ch:
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			t.Fatalf("issue:updated payload type = %T, want map[string]any", e.Payload)
+		}
+		return payload
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive issue:updated event")
+	}
+	return nil
+}
+
 func TestGetProjectRoadmapEmptyProject(t *testing.T) {
 	projectID := createRoadmapTestProject(t, testWorkspaceID, "Roadmap Empty")
 	w, resp := getRoadmap(t, projectID)
@@ -123,6 +142,98 @@ func TestGetProjectRoadmapEmptyProject(t *testing.T) {
 	}
 	if resp.ProjectTitle != "Roadmap Empty" {
 		t.Fatalf("project title = %q", resp.ProjectTitle)
+	}
+}
+
+func TestIssueListSurfacesMilestoneID(t *testing.T) {
+	projectID := createRoadmapTestProject(t, testWorkspaceID, "Roadmap List Milestone")
+	milestone := createMilestoneViaAPI(t, projectID, map[string]any{"name": "Alpha"})
+	issueID := createRoadmapTestIssue(t, testWorkspaceID, projectID, roadmapTestIssue{title: "Milestoned issue", status: "todo"})
+	if w := setIssueMilestoneViaAPI(t, issueID, &milestone.ID); w.Code != http.StatusOK {
+		t.Fatalf("SetIssueMilestone: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues?workspace_id="+testWorkspaceID+"&project_id="+projectID, nil)
+	testHandler.ListIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var listResp struct {
+		Issues []IssueResponse `json:"issues"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&listResp); err != nil {
+		t.Fatalf("decode ListIssues: %v", err)
+	}
+	if len(listResp.Issues) != 1 {
+		t.Fatalf("ListIssues: expected 1 issue, got %d", len(listResp.Issues))
+	}
+	if got := listResp.Issues[0].MilestoneID; got == nil || *got != milestone.ID {
+		t.Fatalf("ListIssues milestone_id = %v, want %s", got, milestone.ID)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues/grouped?workspace_id="+testWorkspaceID+"&project_id="+projectID, nil)
+	testHandler.ListGroupedIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListGroupedIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var grouped GroupedIssuesResponse
+	if err := json.NewDecoder(w.Body).Decode(&grouped); err != nil {
+		t.Fatalf("decode ListGroupedIssues: %v", err)
+	}
+	if len(grouped.Groups) != 1 || len(grouped.Groups[0].Issues) != 1 {
+		t.Fatalf("ListGroupedIssues: expected one group with one issue, got %+v", grouped.Groups)
+	}
+	if got := grouped.Groups[0].Issues[0].MilestoneID; got == nil || *got != milestone.ID {
+		t.Fatalf("ListGroupedIssues milestone_id = %v, want %s", got, milestone.ID)
+	}
+}
+
+func TestRoadmapIssueWritesPublishIssueUpdated(t *testing.T) {
+	projectID := createRoadmapTestProject(t, testWorkspaceID, "Roadmap Event Writes")
+	milestone := createMilestoneViaAPI(t, projectID, map[string]any{"name": "Beta"})
+	issueA := createRoadmapTestIssue(t, testWorkspaceID, projectID, roadmapTestIssue{title: "A", status: "todo"})
+	issueB := createRoadmapTestIssue(t, testWorkspaceID, projectID, roadmapTestIssue{title: "B", status: "todo"})
+
+	gotEvents := make(chan events.Event, 4)
+	testHandler.Bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
+		select {
+		case gotEvents <- e:
+		default:
+		}
+	})
+
+	if w := setIssueMilestoneViaAPI(t, issueA, &milestone.ID); w.Code != http.StatusOK {
+		t.Fatalf("SetIssueMilestone: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	payload := waitForIssueUpdatedEvent(t, gotEvents)
+	if payload["milestone_changed"] != true {
+		t.Fatalf("SetIssueMilestone event milestone_changed = %v, want true", payload["milestone_changed"])
+	}
+	if issue, ok := payload["issue"].(IssueResponse); !ok || issue.ID != issueA || issue.MilestoneID == nil || *issue.MilestoneID != milestone.ID {
+		t.Fatalf("SetIssueMilestone event issue = %#v, want updated issue %s with milestone %s", payload["issue"], issueA, milestone.ID)
+	}
+
+	if w := addDependencyViaAPI(t, issueA, issueB); w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssueDependency: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	payload = waitForIssueUpdatedEvent(t, gotEvents)
+	if payload["dependencies_changed"] != true {
+		t.Fatalf("CreateIssueDependency event dependencies_changed = %v, want true", payload["dependencies_changed"])
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/issues/"+issueA+"/dependencies/"+issueB, nil)
+	req = withURLParam(req, "id", issueA)
+	req = withURLParam(req, "dependsOnId", issueB)
+	testHandler.DeleteIssueDependency(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteIssueDependency: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	payload = waitForIssueUpdatedEvent(t, gotEvents)
+	if payload["dependencies_changed"] != true {
+		t.Fatalf("DeleteIssueDependency event dependencies_changed = %v, want true", payload["dependencies_changed"])
 	}
 }
 

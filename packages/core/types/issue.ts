@@ -47,6 +47,7 @@ export interface Issue {
   creator_id: string;
   parent_issue_id: string | null;
   project_id: string | null;
+  milestone_id?: string | null;
   position: number;
   // Calendar days as date-only "YYYY-MM-DD" (no time, no timezone). Use the
   // helpers in @multica/core/issues/date to format/compare — never `new Date()`
@@ -58,4 +59,50 @@ export interface Issue {
   labels?: Label[];
   created_at: string;
   updated_at: string;
+}
+
+export interface QualityGateTransition {
+  from: IssueStatus | string;
+  to: IssueStatus | string;
+}
+
+export interface QualityGateEvent {
+  actor_type: string;
+  actor_id: string | null;
+  created_at: string;
+}
+
+export interface QualityGateState {
+  key: string;
+  name: string;
+  order: number;
+  required_actor_type?: string;
+  required_role?: string;
+  independent: boolean;
+  transition: QualityGateTransition;
+  complete: boolean;
+  blocked: boolean;
+  reason?: string;
+  next_actor?: string;
+  event?: QualityGateEvent;
+}
+
+export interface IssueQualityGatesResponse {
+  enabled: boolean;
+  project_id?: string;
+  issue_id?: string;
+  gates: QualityGateState[];
+}
+
+export interface QualityGateOverrideResponse {
+  issue: Issue;
+  override: {
+    reason: string;
+    skipped_gates: {
+      key: string;
+      name: string;
+      transition: QualityGateTransition;
+      next_actor: string;
+    }[];
+  };
 }

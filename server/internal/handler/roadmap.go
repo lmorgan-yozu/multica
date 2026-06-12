@@ -11,6 +11,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // Roadmap foundation (ADA-57). Actor contract for every handler in this
@@ -300,7 +301,13 @@ func (h *Handler) SetIssueMilestone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prefix := h.getIssuePrefix(r.Context(), updated.WorkspaceID)
-	writeJSON(w, http.StatusOK, issueToResponse(updated, prefix))
+	resp := issueToResponse(updated, prefix)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(updated.WorkspaceID))
+	h.publish(protocol.EventIssueUpdated, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{
+		"issue":             resp,
+		"milestone_changed": true,
+	})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type CreateIssueDependencyRequest struct {
@@ -357,6 +364,11 @@ func (h *Handler) CreateIssueDependency(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to create dependency link")
 		return
 	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
+	h.publish(protocol.EventIssueUpdated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
+		"issue":                issueToResponse(issue, h.getIssuePrefix(r.Context(), issue.WorkspaceID)),
+		"dependencies_changed": true,
+	})
 	writeJSON(w, http.StatusCreated, IssueDependencyResponse{
 		IssueID:          uuidToString(link.IssueID),
 		DependsOnIssueID: uuidToString(link.DependsOnIssueID),
@@ -412,5 +424,10 @@ func (h *Handler) DeleteIssueDependency(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to delete dependency link")
 		return
 	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
+	h.publish(protocol.EventIssueUpdated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
+		"issue":                issueToResponse(issue, h.getIssuePrefix(r.Context(), issue.WorkspaceID)),
+		"dependencies_changed": true,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }

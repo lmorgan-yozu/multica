@@ -278,6 +278,14 @@ func runProjectMilestoneRemove(cmd *cobra.Command, args []string) error {
 	if err := client.DeleteJSON(ctx, "/api/projects/"+projectRef.ID+"/milestones/"+milestoneRef.ID); err != nil {
 		return fmt.Errorf("remove milestone: %w", err)
 	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, map[string]any{
+			"removed":      true,
+			"project_id":   projectRef.ID,
+			"milestone_id": milestoneRef.ID,
+		})
+	}
 	fmt.Fprintf(os.Stderr, "Milestone %s removed from project %s.\n", milestoneRef.Display, projectRef.Display)
 	return nil
 }

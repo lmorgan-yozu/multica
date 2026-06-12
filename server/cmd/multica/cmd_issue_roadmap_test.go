@@ -65,6 +65,11 @@ func startIssueRoadmapTestServer(t *testing.T) *issueRoadmapTestServer {
 			json.NewEncoder(w).Encode(issue)
 		case r.Method == "POST" && r.URL.Path == "/api/issues/"+issueRoadmapTestIssueID+"/dependencies":
 			recordWrite()
+			var body map[string]any
+			if err := json.Unmarshal(ts.lastRaw, &body); err == nil && body["depends_on_issue_id"] == issueRoadmapTestIssueID {
+				http.Error(w, "self dependency is not allowed", http.StatusBadRequest)
+				return
+			}
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(map[string]any{
 				"issue_id":            issueRoadmapTestIssueID,
@@ -137,9 +142,10 @@ func TestRunIssueMilestoneSetResolvesKeyAndPrefix(t *testing.T) {
 	ts := startIssueRoadmapTestServer(t)
 	ts.setEnv(t)
 
-	cmd := newIssueRoadmapTestCmd(addIssueMilestoneOutputFlag)
+	cmd := newIssueRoadmapTestCmd(addIssueMilestoneSetFlags)
+	_ = cmd.Flags().Set("milestone", "aaaaaaaa")
 	out, err := captureIssueRoadmapStdout(t, func() error {
-		return runIssueMilestoneSet(cmd, []string{"ADA-57", "aaaaaaaa"})
+		return runIssueMilestoneSet(cmd, []string{"ADA-57"})
 	})
 	if err != nil {
 		t.Fatalf("runIssueMilestoneSet: %v", err)
@@ -158,16 +164,17 @@ func TestRunIssueMilestoneSetResolvesKeyAndPrefix(t *testing.T) {
 	}
 }
 
-func TestRunIssueMilestoneClearSendsNull(t *testing.T) {
+func TestRunIssueMilestoneSetClearSendsNull(t *testing.T) {
 	ts := startIssueRoadmapTestServer(t)
 	ts.setEnv(t)
 
-	cmd := newIssueRoadmapTestCmd(addIssueMilestoneOutputFlag)
+	cmd := newIssueRoadmapTestCmd(addIssueMilestoneSetFlags)
+	_ = cmd.Flags().Set("clear", "true")
 	_, err := captureIssueRoadmapStdout(t, func() error {
-		return runIssueMilestoneClear(cmd, []string{"ADA-57"})
+		return runIssueMilestoneSet(cmd, []string{"ADA-57"})
 	})
 	if err != nil {
-		t.Fatalf("runIssueMilestoneClear: %v", err)
+		t.Fatalf("runIssueMilestoneSet: %v", err)
 	}
 
 	ts.mu.Lock()
@@ -179,13 +186,48 @@ func TestRunIssueMilestoneClearSendsNull(t *testing.T) {
 	}
 }
 
+func TestRunIssueMilestoneSetValidatesFlagChoice(t *testing.T) {
+	cmd := newIssueRoadmapTestCmd(addIssueMilestoneSetFlags)
+	if err := runIssueMilestoneSet(cmd, []string{"ADA-57"}); err == nil || !strings.Contains(err.Error(), "--milestone or --clear") {
+		t.Fatalf("expected missing flag error, got %v", err)
+	}
+
+	cmd = newIssueRoadmapTestCmd(addIssueMilestoneSetFlags)
+	_ = cmd.Flags().Set("milestone", "aaaaaaaa")
+	_ = cmd.Flags().Set("clear", "true")
+	if err := runIssueMilestoneSet(cmd, []string{"ADA-57"}); err == nil || !strings.Contains(err.Error(), "either --milestone or --clear") {
+		t.Fatalf("expected mutually exclusive flag error, got %v", err)
+	}
+}
+
+func TestRunIssueMilestoneSetTableOutput(t *testing.T) {
+	ts := startIssueRoadmapTestServer(t)
+	ts.setEnv(t)
+
+	cmd := newIssueRoadmapTestCmd(addIssueMilestoneSetFlags)
+	_ = cmd.Flags().Set("milestone", issueRoadmapTestMilestoneID)
+	_ = cmd.Flags().Set("output", "table")
+	out, err := captureIssueRoadmapStdout(t, func() error {
+		return runIssueMilestoneSet(cmd, []string{"ADA-57"})
+	})
+	if err != nil {
+		t.Fatalf("runIssueMilestoneSet: %v", err)
+	}
+	for _, want := range []string{"KEY", "ADA-57", issueRoadmapTestMilestoneID} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("table output missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRunIssueDependencyAddResolvesKeys(t *testing.T) {
 	ts := startIssueRoadmapTestServer(t)
 	ts.setEnv(t)
 
-	cmd := newIssueRoadmapTestCmd(addIssueDependencyOutputFlag)
+	cmd := newIssueRoadmapTestCmd(addIssueDependencyFlags)
+	_ = cmd.Flags().Set("depends-on", "ADA-54")
 	out, err := captureIssueRoadmapStdout(t, func() error {
-		return runIssueDependencyAdd(cmd, []string{"ADA-57", "ADA-54"})
+		return runIssueDependencyAdd(cmd, []string{"ADA-57"})
 	})
 	if err != nil {
 		t.Fatalf("runIssueDependencyAdd: %v", err)
@@ -204,13 +246,53 @@ func TestRunIssueDependencyAddResolvesKeys(t *testing.T) {
 	}
 }
 
+func TestRunIssueDependencyAddTableOutput(t *testing.T) {
+	ts := startIssueRoadmapTestServer(t)
+	ts.setEnv(t)
+
+	cmd := newIssueRoadmapTestCmd(addIssueDependencyFlags)
+	_ = cmd.Flags().Set("depends-on", "ADA-54")
+	_ = cmd.Flags().Set("output", "table")
+	out, err := captureIssueRoadmapStdout(t, func() error {
+		return runIssueDependencyAdd(cmd, []string{"ADA-57"})
+	})
+	if err != nil {
+		t.Fatalf("runIssueDependencyAdd: %v", err)
+	}
+	for _, want := range []string{"ISSUE", "DEPENDS ON", "ADA-57", "ADA-54", "blocked_by"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("table output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunIssueDependencyAddRequiresDependsOn(t *testing.T) {
+	cmd := newIssueRoadmapTestCmd(addIssueDependencyFlags)
+	if err := runIssueDependencyAdd(cmd, []string{"ADA-57"}); err == nil || !strings.Contains(err.Error(), "--depends-on") {
+		t.Fatalf("expected --depends-on required error, got %v", err)
+	}
+}
+
+func TestRunIssueDependencyAddPropagatesAPIError(t *testing.T) {
+	ts := startIssueRoadmapTestServer(t)
+	ts.setEnv(t)
+
+	cmd := newIssueRoadmapTestCmd(addIssueDependencyFlags)
+	_ = cmd.Flags().Set("depends-on", "ADA-57")
+	err := runIssueDependencyAdd(cmd, []string{"ADA-57"})
+	if err == nil || !strings.Contains(err.Error(), "add dependency") || !strings.Contains(err.Error(), "self dependency is not allowed") {
+		t.Fatalf("expected API validation error, got %v", err)
+	}
+}
+
 func TestRunIssueDependencyRemove(t *testing.T) {
 	ts := startIssueRoadmapTestServer(t)
 	ts.setEnv(t)
 
-	cmd := newIssueRoadmapTestCmd(addIssueDependencyOutputFlag)
-	_, err := captureIssueRoadmapStdout(t, func() error {
-		return runIssueDependencyRemove(cmd, []string{"ADA-57", "ADA-54"})
+	cmd := newIssueRoadmapTestCmd(addIssueDependencyFlags)
+	_ = cmd.Flags().Set("depends-on", "ADA-54")
+	out, err := captureIssueRoadmapStdout(t, func() error {
+		return runIssueDependencyRemove(cmd, []string{"ADA-57"})
 	})
 	if err != nil {
 		t.Fatalf("runIssueDependencyRemove: %v", err)
@@ -219,5 +301,12 @@ func TestRunIssueDependencyRemove(t *testing.T) {
 	defer ts.mu.Unlock()
 	if ts.lastMethod != "DELETE" || !strings.HasSuffix(ts.lastPath, "/dependencies/"+issueRoadmapTestDependsOnID) {
 		t.Fatalf("last request = %s %s", ts.lastMethod, ts.lastPath)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, out)
+	}
+	if payload["removed"] != true || payload["depends_on_issue_id"] != issueRoadmapTestDependsOnID {
+		t.Fatalf("payload = %v", payload)
 	}
 }

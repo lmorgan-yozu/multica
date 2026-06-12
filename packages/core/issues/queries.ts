@@ -75,6 +75,7 @@ export const issueKeys = {
    *  inline file-card / image NodeViews can re-sign download URLs at
    *  click time. */
   attachments: (issueId: string) => ["issues", "attachments", issueId] as const,
+  qualityGates: (issueId: string) => ["issues", "quality-gates", issueId] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => ["issues", "tasks", issueId] as const,
   /** Prefix-match key for invalidating tasks across all issues — used by
@@ -236,6 +237,13 @@ export function issueListOptions(wsId: string, sort?: IssueSortParam) {
     queryFn: () => fetchFirstPages({}, sort),
     select: flattenIssueBuckets,
     placeholderData: keepPreviousData,
+  });
+}
+
+export function issueQualityGatesOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.qualityGates(issueId),
+    queryFn: () => api.getIssueQualityGates(issueId),
   });
 }
 

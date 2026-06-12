@@ -1,14 +1,14 @@
-name: multica-dev
+name: ${MULTICA_DEV_PROJECT:-multica-dev}
 
 services:
   postgres:
     image: pgvector/pgvector:pg17
     environment:
-      POSTGRES_DB: multica
+      POSTGRES_DB: ${POSTGRES_DB:-multica}
       POSTGRES_USER: ${POSTGRES_USER:-multica}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multica}
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${MULTICA_DEV_PG_PORT:-${POSTGRES_PORT:-5432}}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 

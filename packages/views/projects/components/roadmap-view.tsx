@@ -403,8 +403,8 @@ export function RoadmapView({
                   <div className="absolute left-0 right-0 border-b bg-accent/10" style={{ top, height: 40 }} />
                   {marker && (
                     <button
-                      className="absolute top-2 z-[3] flex -translate-x-1/2 items-center gap-1 rounded-full border bg-background px-2 py-1 text-xs shadow-sm hover:bg-accent"
-                      style={{ left: daysBetween(range.start, marker) * DAY_PX }}
+                      className="absolute z-[3] flex -translate-x-1/2 items-center gap-1 rounded-full border bg-background px-2 py-1 text-xs shadow-sm hover:bg-accent"
+                      style={{ left: daysBetween(range.start, marker) * DAY_PX, top: top + 8 }}
                       onClick={() => setSelectedMilestoneId(milestone.id)}
                     >
                       <Milestone className="size-3.5" />

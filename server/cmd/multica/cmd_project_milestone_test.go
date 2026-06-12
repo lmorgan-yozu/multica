@@ -218,7 +218,8 @@ func TestRunProjectMilestoneRemove(t *testing.T) {
 	ts.setEnv(t)
 
 	cmd := newMilestoneTestCmd(addProjectMilestoneRemoveFlags)
-	_, err := captureMilestoneStdout(t, func() error {
+	_ = cmd.Flags().Set("output", "json")
+	out, err := captureMilestoneStdout(t, func() error {
 		return runProjectMilestoneRemove(cmd, []string{milestoneTestProjectID, milestoneTestID})
 	})
 	if err != nil {
@@ -226,5 +227,12 @@ func TestRunProjectMilestoneRemove(t *testing.T) {
 	}
 	if ts.lastMethod != "DELETE" || !strings.HasSuffix(ts.lastPath, "/milestones/"+milestoneTestID) {
 		t.Fatalf("last request = %s %s", ts.lastMethod, ts.lastPath)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, out)
+	}
+	if payload["removed"] != true || payload["milestone_id"] != milestoneTestID {
+		t.Fatalf("payload = %v", payload)
 	}
 }

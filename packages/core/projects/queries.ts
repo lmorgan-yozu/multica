@@ -6,6 +6,9 @@ export const projectKeys = {
   list: (wsId: string) => [...projectKeys.all(wsId), "list"] as const,
   detail: (wsId: string, id: string) =>
     [...projectKeys.all(wsId), "detail", id] as const,
+  roadmapAll: (wsId: string) => [...projectKeys.all(wsId), "roadmap"] as const,
+  roadmap: (wsId: string, id: string) =>
+    [...projectKeys.roadmapAll(wsId), id] as const,
 };
 
 export function projectListOptions(wsId: string) {

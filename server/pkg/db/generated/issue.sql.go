@@ -748,7 +748,7 @@ func (q *Queries) ListChildrenByParents(ctx context.Context, arg ListChildrenByP
 const listIssues = `-- name: ListIssues :many
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.milestone_id
 FROM issue i
 WHERE i.workspace_id = $1
   AND ($4::text IS NULL OR i.status = $4)
@@ -838,6 +838,7 @@ type ListIssuesRow struct {
 	Number        int32              `json:"number"`
 	ProjectID     pgtype.UUID        `json:"project_id"`
 	Metadata      []byte             `json:"metadata"`
+	MilestoneID   pgtype.UUID        `json:"milestone_id"`
 }
 
 // involves_user_id widens the assignee filter to surface issues where the user
@@ -888,6 +889,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 			&i.Number,
 			&i.ProjectID,
 			&i.Metadata,
+			&i.MilestoneID,
 		); err != nil {
 			return nil, err
 		}
@@ -902,7 +904,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 const listOpenIssues = `-- name: ListOpenIssues :many
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.milestone_id
 FROM issue i
 WHERE i.workspace_id = $1
   AND i.status NOT IN ('done', 'cancelled')
@@ -978,6 +980,7 @@ type ListOpenIssuesRow struct {
 	Number        int32              `json:"number"`
 	ProjectID     pgtype.UUID        `json:"project_id"`
 	Metadata      []byte             `json:"metadata"`
+	MilestoneID   pgtype.UUID        `json:"milestone_id"`
 }
 
 // See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
@@ -1020,6 +1023,7 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 			&i.Number,
 			&i.ProjectID,
 			&i.Metadata,
+			&i.MilestoneID,
 		); err != nil {
 			return nil, err
 		}

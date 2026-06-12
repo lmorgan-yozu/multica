@@ -252,6 +252,22 @@ describe("project progress invalidation", () => {
     expectInvalidated(qc, projectKeys.list(WS_ID));
   });
 
+  it("invalidates roadmap projection queries when a project issue changes", () => {
+    qc.setQueryData(projectKeys.roadmap(WS_ID, PROJECT_ID), {
+      project_id: PROJECT_ID,
+      milestones: [],
+      epics: [],
+    });
+
+    onIssueUpdated(qc, WS_ID, {
+      id: ISSUE_ID,
+      project_id: PROJECT_ID,
+      milestone_id: "milestone-1",
+    });
+
+    expectInvalidated(qc, projectKeys.roadmap(WS_ID, PROJECT_ID));
+  });
+
   it("invalidates project queries when a project issue is created", () => {
     onIssueCreated(qc, WS_ID, {
       ...baseIssue,

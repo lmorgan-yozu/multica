@@ -65,6 +65,20 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     expect(parsed.issues[0]?.metadata).toEqual({});
   });
 
+  it("preserves milestone_id in list responses", () => {
+    const payload = {
+      issues: [
+        {
+          ...baseIssue,
+          milestone_id: "22222222-2222-2222-2222-222222222222",
+        },
+      ],
+      total: 1,
+    };
+    const parsed = ListIssuesResponseSchema.parse(payload);
+    expect(parsed.issues[0]?.milestone_id).toBe("22222222-2222-2222-2222-222222222222");
+  });
+
   it("rejects metadata with non-primitive values (nested object)", () => {
     const payload = {
       issues: [{ ...baseIssue, metadata: { nested: { x: 1 } } }],

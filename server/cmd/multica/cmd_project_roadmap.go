@@ -23,11 +23,11 @@ and then by due date, start date, and position. Progress counts done vs
 total leaf issues under each epic; milestones group epics and aggregate
 their progress. The projection is read-only and always derived from the
 live issue graph — there is nothing to hand-maintain.`,
-	Example: `  # Human-readable scan
+	Example: `  # Human-readable scan (full UUID or unique prefix)
   multica project roadmap 4f8a21c3
 
   # Same projection as GET /api/projects/{id}/roadmap
-  multica project roadmap "Ada Bootstrapping" --output json`,
+  multica project roadmap 4f8a21c3 --output json`,
 	Args: exactArgs(1),
 	RunE: runProjectRoadmap,
 }

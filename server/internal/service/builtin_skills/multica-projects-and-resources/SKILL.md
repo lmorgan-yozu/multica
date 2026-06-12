@@ -52,6 +52,24 @@ top-level issues as epics in dependency order with done/total leaf progress,
 plus milestone groupings. It returns the same shape as
 `GET /api/projects/{id}/roadmap`; there is no roadmap state to hand-maintain.
 
+The roadmap's durable inputs are written with these verbs:
+
+```bash
+multica project milestone list <project-id> --output json
+multica project milestone add <project-id> --name "<name>" --target-date 2026-07-01 --output json
+multica project milestone update <project-id> <milestone-id> --target-date 2026-08-01 --output json
+multica project milestone remove <project-id> <milestone-id>
+multica issue milestone set <issue-id> <milestone-id> --output json
+multica issue milestone clear <issue-id> --output json
+multica issue dependency add <issue-id> <depends-on-issue-id> --output json
+multica issue dependency remove <issue-id> <depends-on-issue-id>
+```
+
+`issue dependency add A B` means A depends on B (B must land first). Both
+issues must be in the same project; links that would close a cycle are
+rejected. Issue ids accept routable keys (`MUL-123`); milestone ids accept a
+full UUID or unique prefix (find them via `project milestone list`).
+
 ## When to add a resource
 
 Add/update a project resource when the user asks for durable project context: "把这个 GitHub repo 绑到项目上", "以后都用这个 repo", "agent 总是拿不到这个项目的仓库", or "这个项目要在我的本地目录里跑".

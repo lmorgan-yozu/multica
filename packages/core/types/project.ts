@@ -1,3 +1,5 @@
+import type { IssuePriority, IssueStatus } from "./issue";
+
 export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" | "cancelled";
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
@@ -45,6 +47,50 @@ export interface UpdateProjectRequest {
 export interface ListProjectsResponse {
   projects: Project[];
   total: number;
+}
+
+export interface RoadmapProgress {
+  done: number;
+  total: number;
+}
+
+export interface RoadmapEpic {
+  id: string;
+  identifier: string;
+  number: number;
+  title: string;
+  status: IssueStatus;
+  priority: IssuePriority;
+  milestone_id: string | null;
+  start_date: string | null;
+  due_date: string | null;
+  position: number;
+  progress: RoadmapProgress;
+  blocked_count: number;
+  depends_on: string[];
+  child_count: number;
+}
+
+export interface RoadmapMilestone {
+  id: string;
+  name: string;
+  description: string;
+  target_date: string | null;
+  position: number;
+  progress: RoadmapProgress;
+  blocked_count: number;
+  epic_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectRoadmap {
+  project_id: string;
+  project_title: string;
+  milestones: RoadmapMilestone[];
+  epics: RoadmapEpic[];
+  cycle_detected: boolean;
+  cycle_issue_ids?: string[];
 }
 
 // ProjectResource is a typed pointer from a project to an external resource.

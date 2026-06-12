@@ -81,11 +81,13 @@
     "tooltip_list": "リスト表示",
     "tooltip_gantt": "ガント表示",
     "tooltip_swimlane": "スイムレーン表示",
+    "tooltip_roadmap": "ロードマップ表示",
     "section": "表示",
     "board": "ボード",
     "list": "リスト",
     "gantt": "ガント",
-    "swimlane": "スイムレーン"
+    "swimlane": "スイムレーン",
+    "roadmap": "ロードマップ"
   },
   "gantt": {
     "header_issue": "イシュー",

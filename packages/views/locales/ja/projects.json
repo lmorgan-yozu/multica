@@ -66,6 +66,27 @@
     "toast_project_deleted": "プロジェクトを削除しました",
     "toast_move_issue_failed": "イシューを移動できませんでした"
   },
+  "roadmap": {
+    "empty_title": "ロードマップが未定義です",
+    "empty_hint": "マイルストーンとエピックを作成するとプロジェクトの道筋を表示できます。",
+    "new_epic": "新規エピック",
+    "error_title": "ロードマップを読み込めませんでした",
+    "retry": "再試行",
+    "pct_done": "{{pct}}% 完了",
+    "blocked_count": "{{count}} 件ブロック中",
+    "overdue": "期限超過",
+    "start_value": "開始 {{date}}",
+    "target_value": "目標 {{date}}",
+    "issues_done": "{{done}}/{{total}} 件完了",
+    "child_issues": "子イシュー {{count}} 件",
+    "blocked_by": "ブロック元",
+    "unscheduled": "未スケジュール",
+    "cycle_warning": "依存関係の循環が検出されました。対象エピックはフォールバック順で表示されています。",
+    "header": "マイルストーン / エピック",
+    "now": "現在",
+    "milestone_sheet_desc": "目標 {{date}} - {{pct}}% 完了",
+    "no_milestone": "マイルストーンなし"
+  },
   "resources": {
     "section_header": "リソース",
     "empty": "添付されたリソースはありません。",

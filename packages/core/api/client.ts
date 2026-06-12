@@ -76,6 +76,7 @@ import type {
   PendingChatTasksResponse,
   SendChatMessageResponse,
   Project,
+  ProjectRoadmap,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -1871,6 +1872,10 @@ export class ApiClient {
 
   async getProject(id: string): Promise<Project> {
     return this.fetch(`/api/projects/${id}`);
+  }
+
+  async getProjectRoadmap(id: string): Promise<ProjectRoadmap> {
+    return this.fetch(`/api/projects/${id}/roadmap`);
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -13,6 +13,7 @@ import {
   FolderKanban,
   FolderMinus,
   List,
+  Map as MapIcon,
   SignalHigh,
   SlidersHorizontal,
   X,
@@ -501,9 +502,11 @@ function LabelSubContent({
 export function IssuesHeader({
   scopedIssues,
   allowGantt = false,
+  allowRoadmap = false,
 }: {
   scopedIssues: Issue[];
   allowGantt?: boolean;
+  allowRoadmap?: boolean;
 }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -600,7 +603,7 @@ export function IssuesHeader({
             onToggle={toggleAgentRunningFilter}
             scopedIssueIds={scopedIssueIds}
           />
-          <IssueDisplayControls scopedIssues={scopedIssues} allowGantt={allowGantt} />
+          <IssueDisplayControls scopedIssues={scopedIssues} allowGantt={allowGantt} allowRoadmap={allowRoadmap} />
         </div>
       </div>
     </div>
@@ -611,6 +614,7 @@ export function IssueDisplayControls({
   scopedIssues,
   hideViewToggle = false,
   allowGantt = false,
+  allowRoadmap = false,
 }: {
   scopedIssues: Issue[];
   hideViewToggle?: boolean;
@@ -618,6 +622,9 @@ export function IssueDisplayControls({
   // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
   // fall back to List if the option were exposed there. Keep Gantt opt-in.
   allowGantt?: boolean;
+  // Same as Gantt: Roadmap is project-detail-only because it depends on the
+  // project roadmap projection, milestones, and dependency ordering.
+  allowRoadmap?: boolean;
 }) {
   const { t } = useT("issues");
   const viewMode = useViewStore((s) => s.viewMode);
@@ -635,6 +642,18 @@ export function IssueDisplayControls({
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const cardProperties = useViewStore((s) => s.cardProperties);
   const act = useViewStoreApi().getState();
+
+  const effectiveViewMode: ViewMode =
+    viewMode === "gantt" && !allowGantt
+      ? "list"
+      : viewMode === "roadmap" && !allowRoadmap
+      ? "list"
+      : viewMode;
+
+  useEffect(() => {
+    if (viewMode === "gantt" && !allowGantt) act.setViewMode("list");
+    if (viewMode === "roadmap" && !allowRoadmap) act.setViewMode("list");
+  }, [act, allowGantt, allowRoadmap, viewMode]);
 
   const counts = useIssueCounts(scopedIssues);
 
@@ -1062,9 +1081,8 @@ export function IssueDisplayControls({
           </PopoverContent>
         </Popover>
 
-        {/* View toggle. If a store has `viewMode === "gantt"` persisted but
-            this surface doesn't render Gantt, fall back to "list" so the
-            trigger icon matches what's actually on screen. */}
+        {/* View toggle. If a store has an unsupported project-only mode
+            persisted, fall back to "list" so the trigger matches the screen. */}
         {!hideViewToggle && (
           <DropdownMenu>
             <Tooltip>
@@ -1073,22 +1091,26 @@ export function IssueDisplayControls({
                   <TooltipTrigger
                     render={
                       <Button variant="outline" size="sm" className={controlButtonClass}>
-                        {viewMode === "board" ? (
+                        {effectiveViewMode === "board" ? (
                           <Columns3 className="size-3.5" />
-                        ) : viewMode === "swimlane" ? (
+                        ) : effectiveViewMode === "swimlane" ? (
                           <Waves className="size-3.5" />
-                        ) : viewMode === "gantt" && allowGantt ? (
+                        ) : effectiveViewMode === "gantt" ? (
                           <ChartGantt className="size-3.5" />
+                        ) : effectiveViewMode === "roadmap" ? (
+                          <MapIcon className="size-3.5" />
                         ) : (
                           <List className="size-3.5" />
                         )}
                         <span className="hidden md:inline">
-                          {viewMode === "board"
+                          {effectiveViewMode === "board"
                             ? t(($) => $.view.board)
-                            : viewMode === "swimlane"
+                            : effectiveViewMode === "swimlane"
                             ? t(($) => $.view.swimlane)
-                            : viewMode === "gantt" && allowGantt
+                            : effectiveViewMode === "gantt"
                             ? t(($) => $.view.gantt)
+                            : effectiveViewMode === "roadmap"
+                            ? t(($) => $.view.roadmap)
                             : t(($) => $.view.list)}
                         </span>
                       </Button>
@@ -1097,12 +1119,14 @@ export function IssueDisplayControls({
                 }
               />
               <TooltipContent side="bottom">
-                {viewMode === "board"
+                {effectiveViewMode === "board"
                   ? t(($) => $.view.tooltip_board)
-                  : viewMode === "swimlane"
+                  : effectiveViewMode === "swimlane"
                   ? t(($) => $.view.tooltip_swimlane)
-                  : viewMode === "gantt" && allowGantt
+                  : effectiveViewMode === "gantt"
                   ? t(($) => $.view.tooltip_gantt)
+                  : effectiveViewMode === "roadmap"
+                  ? t(($) => $.view.tooltip_roadmap)
                   : t(($) => $.view.tooltip_list)}
               </TooltipContent>
             </Tooltip>
@@ -1110,7 +1134,7 @@ export function IssueDisplayControls({
               <DropdownMenuGroup>
                 <DropdownMenuLabel>{t(($) => $.view.section)}</DropdownMenuLabel>
               </DropdownMenuGroup>
-              <DropdownMenuRadioGroup value={viewMode} onValueChange={(v) => act.setViewMode(v as ViewMode)}>
+              <DropdownMenuRadioGroup value={effectiveViewMode} onValueChange={(v) => act.setViewMode(v as ViewMode)}>
                 <DropdownMenuRadioItem value="board">
                   <Columns3 />
                   {t(($) => $.view.board)}
@@ -1127,6 +1151,12 @@ export function IssueDisplayControls({
                   <DropdownMenuRadioItem value="gantt">
                     <ChartGantt />
                     {t(($) => $.view.gantt)}
+                  </DropdownMenuRadioItem>
+                )}
+                {allowRoadmap && (
+                  <DropdownMenuRadioItem value="roadmap">
+                    <MapIcon />
+                    {t(($) => $.view.roadmap)}
                   </DropdownMenuRadioItem>
                 )}
               </DropdownMenuRadioGroup>

@@ -6,9 +6,9 @@ import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, 
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueAssigneeGroup, ProjectStatus, ProjectPriority, UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, IssueAssigneeGroup, ProjectRoadmap, ProjectStatus, ProjectPriority, UpdateIssueRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
-import { projectDetailOptions } from "@multica/core/projects/queries";
+import { projectDetailOptions, projectRoadmapOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
@@ -46,6 +46,7 @@ import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
 import { GanttView } from "../../issues/components/gantt-view";
 import { SwimLaneView } from "../../issues/components/swimlane-view";
+import { RoadmapView } from "./roadmap-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -122,6 +123,10 @@ function ProjectIssuesContent({
   filter,
   sort,
   ganttIssues,
+  roadmap,
+  roadmapIsLoading,
+  roadmapIsError,
+  onRetryRoadmap,
 }: {
   projectId: string;
   projectIssues: Issue[];
@@ -132,6 +137,10 @@ function ProjectIssuesContent({
   filter: MyIssuesFilter;
   sort?: IssueSortParam;
   ganttIssues: Issue[];
+  roadmap?: ProjectRoadmap;
+  roadmapIsLoading: boolean;
+  roadmapIsError: boolean;
+  onRetryRoadmap: () => void;
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -214,7 +223,7 @@ function ProjectIssuesContent({
   // but non-empty project would surface a misleading "no issues" CTA.
   // For Board/List the bucketed cache really is the ground truth,
   // so an empty result means an empty project.
-  if (viewMode !== "gantt" && viewMode !== "swimlane" && projectIssues.length === 0) {
+  if (viewMode !== "gantt" && viewMode !== "swimlane" && viewMode !== "roadmap" && projectIssues.length === 0) {
     return (
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
         <ListTodo className="h-10 w-10 text-muted-foreground/40" />
@@ -266,6 +275,15 @@ function ProjectIssuesContent({
         />
       )}
       {viewMode === "gantt" && <GanttView issues={filteredGanttIssues} />}
+      {viewMode === "roadmap" && (
+        <RoadmapView
+          projectId={projectId}
+          roadmap={roadmap}
+          isLoading={roadmapIsLoading}
+          isError={roadmapIsError}
+          onRetry={onRetryRoadmap}
+        />
+      )}
       {viewMode === "swimlane" && (
         <SwimLaneView
           issues={issues}
@@ -306,6 +324,7 @@ function ProjectIssuesSurface({
   const labelFilters = useViewStore((s) => s.labelFilters);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
   const usesGantt = viewMode === "gantt";
+  const usesRoadmap = viewMode === "roadmap";
 
   const sort = useMemo(
     () => ({
@@ -356,6 +375,10 @@ function ProjectIssuesSurface({
     ...projectGanttIssuesOptions(wsId, projectId),
     enabled: usesGantt,
   });
+  const roadmapQuery = useQuery({
+    ...projectRoadmapOptions(wsId, projectId),
+    enabled: usesRoadmap,
+  });
   const bucketedIssues = usesAssigneeBoard
     ? (assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [])
     : (statusIssuesQuery.data ?? []);
@@ -364,10 +387,11 @@ function ProjectIssuesSurface({
   // would otherwise be blamed for an empty Board cache, even though it has
   // its own (potentially non-empty) scheduled cache.
   const projectIssues = usesGantt ? ganttIssues : bucketedIssues;
+  const headerIssues = usesRoadmap ? [] : projectIssues;
 
   return (
     <>
-      <IssuesHeader scopedIssues={projectIssues} allowGantt />
+      <IssuesHeader scopedIssues={headerIssues} allowGantt allowRoadmap />
       <ProjectIssuesContent
         projectId={projectId}
         projectIssues={projectIssues}
@@ -378,6 +402,10 @@ function ProjectIssuesSurface({
         filter={filter}
         sort={sort}
         ganttIssues={ganttIssues}
+        roadmap={roadmapQuery.data}
+        roadmapIsLoading={roadmapQuery.isLoading}
+        roadmapIsError={roadmapQuery.isError}
+        onRetryRoadmap={() => void roadmapQuery.refetch()}
       />
       <BatchActionToolbar />
     </>

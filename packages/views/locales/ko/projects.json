@@ -66,6 +66,27 @@
     "toast_project_deleted": "프로젝트를 삭제했습니다",
     "toast_move_issue_failed": "이슈를 이동하지 못했습니다"
   },
+  "roadmap": {
+    "empty_title": "로드맵이 정의되지 않았습니다",
+    "empty_hint": "마일스톤과 에픽을 만들면 프로젝트 경로가 표시됩니다.",
+    "new_epic": "새 에픽",
+    "error_title": "로드맵을 불러오지 못했습니다",
+    "retry": "다시 시도",
+    "pct_done": "{{pct}}% 완료",
+    "blocked_count": "{{count}}개 차단됨",
+    "overdue": "기한 초과",
+    "start_value": "시작 {{date}}",
+    "target_value": "목표 {{date}}",
+    "issues_done": "{{done}}/{{total}}개 이슈 완료",
+    "child_issues": "하위 이슈 {{count}}개",
+    "blocked_by": "차단 원인",
+    "unscheduled": "일정 없음",
+    "cycle_warning": "의존성 순환이 감지되었습니다. 영향을 받은 에픽은 대체 순서로 표시됩니다.",
+    "header": "마일스톤 / 에픽",
+    "now": "현재",
+    "milestone_sheet_desc": "목표 {{date}} - {{pct}}% 완료",
+    "no_milestone": "마일스톤 없음"
+  },
   "resources": {
     "section_header": "리소스",
     "empty": "첨부된 리소스가 없습니다.",

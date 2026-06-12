@@ -83,11 +83,13 @@
     "tooltip_list": "List view",
     "tooltip_gantt": "Gantt view",
     "tooltip_swimlane": "Swimlane view",
+    "tooltip_roadmap": "Roadmap view",
     "section": "View",
     "board": "Board",
     "list": "List",
     "gantt": "Gantt",
-    "swimlane": "Swimlane"
+    "swimlane": "Swimlane",
+    "roadmap": "Roadmap"
   },
   "gantt": {
     "header_issue": "Issue",

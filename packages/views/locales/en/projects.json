@@ -66,6 +66,27 @@
     "toast_project_deleted": "Project deleted",
     "toast_move_issue_failed": "Failed to move issue"
   },
+  "roadmap": {
+    "empty_title": "No roadmap defined",
+    "empty_hint": "Create milestones and epics to see the project path.",
+    "new_epic": "New epic",
+    "error_title": "Failed to load roadmap",
+    "retry": "Retry",
+    "pct_done": "{{pct}}% done",
+    "blocked_count": "{{count}} blocked",
+    "overdue": "Overdue",
+    "start_value": "Start {{date}}",
+    "target_value": "Target {{date}}",
+    "issues_done": "{{done}}/{{total}} issues done",
+    "child_issues": "{{count}} child issues",
+    "blocked_by": "Blocked by",
+    "unscheduled": "Unscheduled",
+    "cycle_warning": "Dependency cycle detected. Affected epics are listed in fallback order.",
+    "header": "Milestone / epic",
+    "now": "Now",
+    "milestone_sheet_desc": "Target {{date}} - {{pct}}% done",
+    "no_milestone": "No milestone"
+  },
   "resources": {
     "section_header": "Resources",
     "empty": "No resources attached.",

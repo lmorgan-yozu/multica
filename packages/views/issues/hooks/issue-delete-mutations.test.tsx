@@ -84,6 +84,11 @@ const usage: IssueUsageSummary = {
   total_cache_read_tokens: 1,
   total_cache_write_tokens: 2,
   task_count: 1,
+  usage_task_count: 1,
+  missing_usage_task_count: 0,
+  usage_status: "complete",
+  task_breakdown: [],
+  agent_breakdown: [],
 };
 
 const attachment: Attachment = {

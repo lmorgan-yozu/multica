@@ -440,6 +440,39 @@ export interface IssueUsageSummary {
   total_cache_read_tokens: number;
   total_cache_write_tokens: number;
   task_count: number;
+  usage_task_count: number;
+  missing_usage_task_count: number;
+  usage_status: "empty" | "missing" | "partial" | "complete";
+  task_breakdown: IssueUsageTaskBreakdown[];
+  agent_breakdown: IssueUsageAgentBreakdown[];
+}
+
+export interface IssueUsageTaskBreakdown {
+  task_id: string;
+  session_id?: string | null;
+  agent_id: string;
+  status: string;
+  provider?: string;
+  model?: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  usage_status: "missing" | "complete";
+}
+
+export interface IssueUsageAgentBreakdown {
+  agent_id: string;
+  provider?: string;
+  model?: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  task_count: number;
+  usage_task_count: number;
+  missing_usage_task_count: number;
+  usage_status: "empty" | "missing" | "partial" | "complete";
 }
 
 export interface RuntimeUsage {

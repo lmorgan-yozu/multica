@@ -12,13 +12,12 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
-// multica issue milestone {set|clear} and multica issue dependency
-// {add|remove} — the roadmap write verbs on the issue side (ADA-57). They
-// wrap PUT /api/issues/{id}/milestone and POST/DELETE
-// /api/issues/{id}/dependencies; actor contract: any authenticated
-// workspace member or agent on issues in their workspace. The server
-// enforces same-project membership for both link kinds and rejects
-// dependency cycles at write time.
+// multica issue milestone set and multica issue dependency {add|remove} —
+// the roadmap write verbs on the issue side (ADA-57). They wrap PUT
+// /api/issues/{id}/milestone and POST/DELETE /api/issues/{id}/dependencies;
+// actor contract: any authenticated workspace member or agent on issues in
+// their workspace. The server enforces same-project membership for both link
+// kinds and rejects dependency cycles at write time.
 
 var issueMilestoneCmd = &cobra.Command{
 	Use:   "milestone",
@@ -26,11 +25,14 @@ var issueMilestoneCmd = &cobra.Command{
 }
 
 var issueMilestoneSetCmd = &cobra.Command{
-	Use:   "set <issue-id> <milestone-id>",
-	Short: "Put an issue in a milestone (must belong to the issue's project)",
-	Example: `  multica issue milestone set ADA-54 aaaa1111
-  multica issue milestone set ADA-54 aaaa1111 --output json`,
-	Args: exactArgs(2),
+	Use:   "set <issue-id>",
+	Short: "Put an issue in a milestone, or clear its milestone",
+	Long: `Put an issue in a milestone using --milestone, or clear its current
+milestone using --clear. The milestone must belong to the issue's project.`,
+	Example: `  multica issue milestone set ADA-54 --milestone aaaa1111
+  multica issue milestone set ADA-54 --clear
+  multica issue milestone set ADA-54 --milestone aaaa1111 --output json`,
+	Args: exactArgs(1),
 	RunE: runIssueMilestoneSet,
 }
 
@@ -48,24 +50,25 @@ var issueDependencyCmd = &cobra.Command{
 }
 
 var issueDependencyAddCmd = &cobra.Command{
-	Use:   "add <issue-id> <depends-on-issue-id>",
+	Use:   "add <issue-id>",
 	Short: "Record that the first issue depends on the second landing first",
-	Long: `Record a roadmap dependency: <issue-id> depends on <depends-on-issue-id>.
+	Long: `Record a roadmap dependency: <issue-id> depends on the issue passed
+with --depends-on.
 
 Both issues must belong to the same project. Links that would close a
 cycle are rejected. Dependency links between top-level issues (epics)
 drive roadmap ordering.`,
 	Example: `  # ADA-57 depends on ADA-54 (ADA-54 must land first)
-  multica issue dependency add ADA-57 ADA-54`,
-	Args: exactArgs(2),
+  multica issue dependency add ADA-57 --depends-on ADA-54`,
+	Args: exactArgs(1),
 	RunE: runIssueDependencyAdd,
 }
 
 var issueDependencyRemoveCmd = &cobra.Command{
-	Use:     "remove <issue-id> <depends-on-issue-id>",
+	Use:     "remove <issue-id>",
 	Short:   "Remove a roadmap depends-on link (idempotent)",
-	Example: `  multica issue dependency remove ADA-57 ADA-54`,
-	Args:    exactArgs(2),
+	Example: `  multica issue dependency remove ADA-57 --depends-on ADA-54`,
+	Args:    exactArgs(1),
 	RunE:    runIssueDependencyRemove,
 }
 
@@ -73,25 +76,46 @@ func addIssueMilestoneOutputFlag(cmd *cobra.Command) {
 	cmd.Flags().String("output", "json", "Output format: table or json")
 }
 
+func addIssueMilestoneSetFlags(cmd *cobra.Command) {
+	cmd.Flags().String("milestone", "", "Milestone id, UUID prefix, or resolvable reference")
+	cmd.Flags().Bool("clear", false, "Clear the issue's milestone")
+	addIssueMilestoneOutputFlag(cmd)
+}
+
 func addIssueDependencyOutputFlag(cmd *cobra.Command) {
 	cmd.Flags().String("output", "json", "Output format: table or json")
+}
+
+func addIssueDependencyFlags(cmd *cobra.Command) {
+	cmd.Flags().String("depends-on", "", "Issue id, key, or UUID prefix this issue depends on (required)")
+	addIssueDependencyOutputFlag(cmd)
 }
 
 func init() {
 	issueCmd.AddCommand(issueMilestoneCmd)
 	issueMilestoneCmd.AddCommand(issueMilestoneSetCmd)
 	issueMilestoneCmd.AddCommand(issueMilestoneClearCmd)
-	addIssueMilestoneOutputFlag(issueMilestoneSetCmd)
+	addIssueMilestoneSetFlags(issueMilestoneSetCmd)
 	addIssueMilestoneOutputFlag(issueMilestoneClearCmd)
 
 	issueCmd.AddCommand(issueDependencyCmd)
 	issueDependencyCmd.AddCommand(issueDependencyAddCmd)
 	issueDependencyCmd.AddCommand(issueDependencyRemoveCmd)
-	addIssueDependencyOutputFlag(issueDependencyAddCmd)
-	addIssueDependencyOutputFlag(issueDependencyRemoveCmd)
+	addIssueDependencyFlags(issueDependencyAddCmd)
+	addIssueDependencyFlags(issueDependencyRemoveCmd)
 }
 
 func runIssueMilestoneSet(cmd *cobra.Command, args []string) error {
+	milestoneInput, _ := cmd.Flags().GetString("milestone")
+	clear, _ := cmd.Flags().GetBool("clear")
+	milestoneInput = strings.TrimSpace(milestoneInput)
+	if clear && milestoneInput != "" {
+		return fmt.Errorf("pass either --milestone or --clear, not both")
+	}
+	if !clear && milestoneInput == "" {
+		return fmt.Errorf("pass --milestone or --clear")
+	}
+
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -103,9 +127,12 @@ func runIssueMilestoneSet(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
+	if clear {
+		return setIssueMilestone(ctx, cmd, client, issueRef, nil)
+	}
+
 	// A full milestone UUID goes straight through; a prefix resolves
 	// against the issue's project roadmap (the only milestone read path).
-	milestoneInput := strings.TrimSpace(args[1])
 	var milestoneRef resolvedID
 	if uuidRegexp.MatchString(milestoneInput) {
 		milestoneRef = resolvedID{ID: milestoneInput, Display: milestoneInput}
@@ -120,12 +147,7 @@ func runIssueMilestoneSet(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	body := map[string]any{"milestone_id": milestoneRef.ID}
-	var issue map[string]any
-	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID+"/milestone", body, &issue); err != nil {
-		return fmt.Errorf("set issue milestone: %w", err)
-	}
-	return printIssueMilestoneResult(cmd, issue)
+	return setIssueMilestone(ctx, cmd, client, issueRef, milestoneRef.ID)
 }
 
 func runIssueMilestoneClear(cmd *cobra.Command, args []string) error {
@@ -141,10 +163,14 @@ func runIssueMilestoneClear(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 
-	body := map[string]any{"milestone_id": nil}
+	return setIssueMilestone(ctx, cmd, client, issueRef, nil)
+}
+
+func setIssueMilestone(ctx context.Context, cmd *cobra.Command, client *cli.APIClient, issueRef resolvedID, milestoneID any) error {
+	body := map[string]any{"milestone_id": milestoneID}
 	var issue map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID+"/milestone", body, &issue); err != nil {
-		return fmt.Errorf("clear issue milestone: %w", err)
+		return fmt.Errorf("set issue milestone: %w", err)
 	}
 	return printIssueMilestoneResult(cmd, issue)
 }
@@ -180,6 +206,11 @@ func printIssueMilestoneResult(cmd *cobra.Command, issue map[string]any) error {
 }
 
 func runIssueDependencyAdd(cmd *cobra.Command, args []string) error {
+	dependsOn, _ := cmd.Flags().GetString("depends-on")
+	if strings.TrimSpace(dependsOn) == "" {
+		return fmt.Errorf("--depends-on is required")
+	}
+
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -191,7 +222,7 @@ func runIssueDependencyAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
-	dependsOnRef, err := resolveIssueRef(ctx, client, args[1])
+	dependsOnRef, err := resolveIssueRef(ctx, client, dependsOn)
 	if err != nil {
 		return fmt.Errorf("resolve depends-on issue: %w", err)
 	}
@@ -213,6 +244,11 @@ func runIssueDependencyAdd(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueDependencyRemove(cmd *cobra.Command, args []string) error {
+	dependsOn, _ := cmd.Flags().GetString("depends-on")
+	if strings.TrimSpace(dependsOn) == "" {
+		return fmt.Errorf("--depends-on is required")
+	}
+
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -224,13 +260,21 @@ func runIssueDependencyRemove(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
-	dependsOnRef, err := resolveIssueRef(ctx, client, args[1])
+	dependsOnRef, err := resolveIssueRef(ctx, client, dependsOn)
 	if err != nil {
 		return fmt.Errorf("resolve depends-on issue: %w", err)
 	}
 
 	if err := client.DeleteJSON(ctx, "/api/issues/"+issueRef.ID+"/dependencies/"+dependsOnRef.ID); err != nil {
 		return fmt.Errorf("remove dependency: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, map[string]any{
+			"removed":             true,
+			"issue_id":            issueRef.ID,
+			"depends_on_issue_id": dependsOnRef.ID,
+		})
 	}
 	fmt.Fprintf(os.Stderr, "Dependency %s -> %s removed.\n", issueRef.Display, dependsOnRef.Display)
 	return nil

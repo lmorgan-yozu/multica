@@ -22,7 +22,7 @@ DATABASE_URL="${DATABASE_URL:-}"
 export PGPASSWORD="$POSTGRES_PASSWORD"
 
 db_host=""
-db_port="${POSTGRES_PORT:-5432}"
+db_port="${MULTICA_DEV_PG_PORT:-${POSTGRES_PORT:-5432}}"
 db_name="$POSTGRES_DB"
 
 parse_database_url() {
@@ -62,13 +62,57 @@ if [ -n "$DATABASE_URL" ]; then
   parse_database_url
 fi
 
+MULTICA_DEV_PG_PORT="${MULTICA_DEV_PG_PORT:-$db_port}"
+POSTGRES_PORT="${POSTGRES_PORT:-$db_port}"
+MULTICA_DEV_PROJECT="${MULTICA_DEV_PROJECT:-multica-dev}"
+export MULTICA_DEV_PROJECT MULTICA_DEV_PG_PORT POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD
+
 is_local() {
   [ -z "$DATABASE_URL" ] || [ "$db_host" = "localhost" ] || [ "$db_host" = "127.0.0.1" ] || [ "$db_host" = "::1" ]
 }
 
+owned_postgres_container() {
+  [ -n "$(docker compose ps -q postgres 2>/dev/null || true)" ]
+}
+
+port_is_busy() {
+  local port="$1"
+
+  if command -v ss > /dev/null 2>&1; then
+    ss -H -ltn "sport = :$port" 2>/dev/null | grep -q . && return 0
+  fi
+  if command -v lsof > /dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 && return 0
+  fi
+  if command -v nc > /dev/null 2>&1; then
+    nc -z 127.0.0.1 "$port" >/dev/null 2>&1 && return 0
+  fi
+  return 1
+}
+
+print_busy_port_help() {
+  local task_name="${MULTICA_DEV_PROJECT:-multica-dev}-pg"
+  cat <<EOF
+ERROR: Configured PostgreSQL port $db_port is already in use, and no postgres container belongs to compose project '$MULTICA_DEV_PROJECT'.
+
+Use a free per-task 55xxx port and point DATABASE_URL at it instead, for example:
+
+  docker run -d --name ${task_name} -p 127.0.0.1:55xxx:5432 -e POSTGRES_PASSWORD=test pgvector/pgvector:pg17
+  export DATABASE_URL=postgres://postgres:test@127.0.0.1:55xxx/postgres?sslmode=disable
+
+Then re-run the command. Do not bind 5432 and do not reuse a compose project you did not create.
+EOF
+}
+
 if is_local; then
-  # ---------- Local: use Docker ----------
-  echo "==> Ensuring shared PostgreSQL container is running on localhost:5432..."
+  # ---------- Local: use this checkout's configured Docker Compose project ----------
+  echo "==> Ensuring PostgreSQL for compose project '$MULTICA_DEV_PROJECT' on 127.0.0.1:$db_port..."
+
+  if ! owned_postgres_container && port_is_busy "$db_port"; then
+    print_busy_port_help
+    exit 1
+  fi
+
   docker compose up -d postgres
 
   echo "==> Waiting for PostgreSQL to be ready..."
@@ -87,7 +131,7 @@ if is_local; then
       > /dev/null
   fi
 
-  echo "✓ PostgreSQL ready (local Docker). Database: $POSTGRES_DB"
+  echo "✓ PostgreSQL ready (local Docker). Project: $MULTICA_DEV_PROJECT. Database: $POSTGRES_DB"
 else
   # ---------- Remote: skip Docker, verify connectivity ----------
   echo "==> Remote database detected (host: $db_host). Skipping Docker."

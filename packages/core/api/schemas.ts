@@ -18,6 +18,7 @@ import type {
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
   QualityGateOverrideResponse,
+  ProjectRoadmap,
   Squad,
   TimelineEntry,
   User,
@@ -230,6 +231,58 @@ export const ListIssuesResponseSchema = z.object({
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
   issues: [],
   total: 0,
+};
+
+const RoadmapProgressSchema = z.object({
+  done: z.number().default(0),
+  total: z.number().default(0),
+}).loose();
+
+const RoadmapEpicSchema = z.object({
+  id: z.string(),
+  identifier: z.string().default(""),
+  number: z.number().default(0),
+  title: z.string(),
+  status: z.string().default(""),
+  priority: z.string().default(""),
+  milestone_id: z.string().nullable().default(null),
+  start_date: z.string().nullable().default(null),
+  due_date: z.string().nullable().default(null),
+  position: z.number().default(0),
+  progress: RoadmapProgressSchema.default({ done: 0, total: 0 }),
+  blocked_count: z.number().default(0),
+  depends_on: z.array(z.string()).default([]),
+  child_count: z.number().default(0),
+}).loose();
+
+const RoadmapMilestoneSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  target_date: z.string().nullable().default(null),
+  position: z.number().default(0),
+  progress: RoadmapProgressSchema.default({ done: 0, total: 0 }),
+  blocked_count: z.number().default(0),
+  epic_ids: z.array(z.string()).default([]),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const ProjectRoadmapSchema = z.object({
+  project_id: z.string(),
+  project_title: z.string().default(""),
+  milestones: z.array(RoadmapMilestoneSchema).default([]),
+  epics: z.array(RoadmapEpicSchema).default([]),
+  cycle_detected: z.boolean().default(false),
+  cycle_issue_ids: z.array(z.string()).optional(),
+}).loose();
+
+export const EMPTY_PROJECT_ROADMAP: ProjectRoadmap = {
+  project_id: "",
+  project_title: "",
+  milestones: [],
+  epics: [],
+  cycle_detected: false,
 };
 
 const IssueAssigneeGroupSchema = z.object({

@@ -66,6 +66,23 @@
     "toast_project_deleted": "Project deleted",
     "toast_move_issue_failed": "Failed to move issue"
   },
+  "roadmap": {
+    "title": "Roadmap",
+    "summary": "{{epicCount}} epics across {{milestoneCount}} milestones",
+    "progress": "Progress",
+    "ungrouped_title": "Project path",
+    "date_target": "Target",
+    "date_due": "Due",
+    "depends_on": "Depends on {{labels}}",
+    "blocked": "Blocked",
+    "blocked_count": "{{count}} blocked",
+    "cycle_detected": "Dependency cycle detected",
+    "empty_title": "No roadmap yet",
+    "empty_hint": "Parented project issues will appear here as epics; milestones and dependencies refine the path when added.",
+    "error_title": "Roadmap could not load",
+    "error_hint": "The project issues view is still available below.",
+    "retry": "Retry"
+  },
   "resources": {
     "section_header": "Resources",
     "empty": "No resources attached.",

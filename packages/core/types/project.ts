@@ -47,6 +47,50 @@ export interface ListProjectsResponse {
   total: number;
 }
 
+export interface RoadmapProgress {
+  done: number;
+  total: number;
+}
+
+export interface RoadmapEpic {
+  id: string;
+  identifier: string;
+  number: number;
+  title: string;
+  status: string;
+  priority: string;
+  milestone_id: string | null;
+  start_date: string | null;
+  due_date: string | null;
+  position: number;
+  progress: RoadmapProgress;
+  blocked_count: number;
+  depends_on: string[];
+  child_count: number;
+}
+
+export interface RoadmapMilestone {
+  id: string;
+  name: string;
+  description: string;
+  target_date: string | null;
+  position: number;
+  progress: RoadmapProgress;
+  blocked_count: number;
+  epic_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectRoadmap {
+  project_id: string;
+  project_title: string;
+  milestones: RoadmapMilestone[];
+  epics: RoadmapEpic[];
+  cycle_detected: boolean;
+  cycle_issue_ids?: string[];
+}
+
 // ProjectResource is a typed pointer from a project to an external resource.
 // The resource_ref shape depends on resource_type. New types add a case in
 // validateAndNormalizeResourceRef on the server and a renderer in the UI.

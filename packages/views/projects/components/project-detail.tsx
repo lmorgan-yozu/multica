@@ -41,6 +41,7 @@ import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
+import { ProjectRoadmapSection } from "./project-roadmap";
 import { IssuesHeader } from "../../issues/components/issues-header";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
@@ -799,12 +800,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           />
 
           <ViewStoreProvider store={projectViewStore}>
-              <ProjectIssuesSurface
-                projectId={projectId}
-                scope={projectScope}
-                filter={projectFilter}
-              />
-            </ViewStoreProvider>
+            <ProjectRoadmapSection projectId={projectId} />
+            <ProjectIssuesSurface
+              projectId={projectId}
+              scope={projectScope}
+              filter={projectFilter}
+            />
+          </ViewStoreProvider>
           </div>
         </ResizablePanel>
         {!isMobile && <ResizableHandle />}

@@ -32,7 +32,7 @@ Engineers and QA are additionally bound to the `tdd` skill.
 | Backend Engineer | gpt-5.5 (Codex) | Go server, schema, API, daemon/CLI |
 | Frontend Engineer | gpt-5.5 (Codex) | Next.js web app |
 | Fable Engineer (HIGH COST) | claude-fable-5 (Claude) | Complex, ambiguous, cross-cutting work only — Tech Lead must justify its use |
-| Code Reviewer | claude-sonnet-4.6 (Claude) | Primary quality gate; frequent-deep reviews, preserving Fable cap |
+| Code Reviewer | claude-sonnet-4-6 (Claude) | Primary quality gate; frequent-deep reviews, preserving Fable cap |
 | Code Reviewer (Codex) | gpt-5.5 (Codex) | Understudy for Claude cap overflow |
 | QA Engineer | gpt-5.5 (Codex) | Verification against acceptance criteria; release-readiness casting vote |
 | Security Reviewer | claude-fable-5 (Claude) | Auth, tenant isolation, secrets, untrusted input; verdict is a veto |

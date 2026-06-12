@@ -24,6 +24,14 @@ interface SubmitButtonProps {
   tooltip?: ReactNode;
   /** Tooltip shown over the stop button while a run is in progress. */
   stopTooltip?: ReactNode;
+  /**
+   * Accessible name for the icon-only send button. Callers pass their
+   * translated "Send" string — without it the button has no name for
+   * assistive tech (the tooltip content is not exposed as a label).
+   */
+  ariaLabel?: string;
+  /** Accessible name for the icon-only stop button. */
+  stopAriaLabel?: string;
 }
 
 function SubmitButton({
@@ -34,10 +42,12 @@ function SubmitButton({
   onStop,
   tooltip,
   stopTooltip,
+  ariaLabel,
+  stopAriaLabel,
 }: SubmitButtonProps) {
   if (running) {
     const stopButton = (
-      <Button size="icon-sm" onClick={onStop}>
+      <Button size="icon-sm" onClick={onStop} aria-label={stopAriaLabel}>
         <Square className="fill-current" />
       </Button>
     );
@@ -51,7 +61,12 @@ function SubmitButton({
   }
 
   const submitButton = (
-    <Button size="icon-sm" disabled={disabled || loading} onClick={onClick}>
+    <Button
+      size="icon-sm"
+      disabled={disabled || loading}
+      onClick={onClick}
+      aria-label={ariaLabel}
+    >
       {loading ? <Loader2 className="animate-spin" /> : <ArrowUp />}
     </Button>
   );

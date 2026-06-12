@@ -258,6 +258,8 @@ export function ChatInput({
             onStop={onStop}
             tooltip={`${t(($) => $.input.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}
             stopTooltip={t(($) => $.input.stop_tooltip)}
+            ariaLabel={t(($) => $.input.send_tooltip)}
+            stopAriaLabel={t(($) => $.input.stop_tooltip)}
           />
         </div>
         {uploadEnabled && isDragOver && <FileDropOverlay />}

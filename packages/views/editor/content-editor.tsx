@@ -228,6 +228,14 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         },
         attributes: {
           class: cn("flex-1 rich-text-editor text-sm outline-none", className),
+          // Same exposure TitleEditor already provides: ProseMirror's
+          // contenteditable div has no implicit role, so without these the
+          // editor is invisible to assistive tech (and unselectable by
+          // accessible name). The placeholder doubles as the label, exactly
+          // like a placeholder-only <input>.
+          role: "textbox",
+          "aria-multiline": "true",
+          ...(placeholderText ? { "aria-label": placeholderText } : {}),
         },
       },
     });

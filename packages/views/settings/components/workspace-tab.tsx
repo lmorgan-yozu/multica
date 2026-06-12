@@ -305,8 +305,9 @@ export function WorkspaceTab() {
               </div>
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.name_label)}</Label>
+              <Label htmlFor="workspace-name" className="text-xs text-muted-foreground">{t(($) => $.workspace.name_label)}</Label>
               <Input
+                id="workspace-name"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}

@@ -158,11 +158,20 @@ func createLoopBrakeTestIssue(t *testing.T, title string) db.Issue {
 	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("load test agent: %v", err)
 	}
+	var number int
+	if err := testPool.QueryRow(ctx, `
+UPDATE workspace
+SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+WHERE id = $1
+RETURNING issue_counter
+	`, testWorkspaceID).Scan(&number); err != nil {
+		t.Fatalf("next issue number: %v", err)
+	}
 	var issueID pgtype.UUID
 	if err := testPool.QueryRow(ctx, `
-INSERT INTO issue (workspace_id, title, status, priority, assignee_type, assignee_id, creator_type, creator_id)
-VALUES ($1, $2, 'in_progress', 'medium', 'agent', $3, 'member', $4)
-RETURNING id`, parseUUID(testWorkspaceID), title, parseUUID(agentID), parseUUID(testUserID)).Scan(&issueID); err != nil {
+INSERT INTO issue (workspace_id, title, status, priority, assignee_type, assignee_id, creator_type, creator_id, number)
+VALUES ($1, $2, 'in_progress', 'medium', 'agent', $3, 'member', $4, $5)
+RETURNING id`, parseUUID(testWorkspaceID), title, parseUUID(agentID), parseUUID(testUserID), number).Scan(&issueID); err != nil {
 		t.Fatalf("create loop brake test issue: %v", err)
 	}
 	t.Cleanup(func() {

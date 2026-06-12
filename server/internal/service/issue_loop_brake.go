@@ -211,6 +211,13 @@ func (s *TaskService) EvaluateIssueLoopBrakeForTask(ctx context.Context, task db
 	if !task.IssueID.Valid {
 		return nil, nil
 	}
+	active, err := s.GetActiveIssueLoopBrake(ctx, task.IssueID)
+	if err != nil {
+		return nil, fmt.Errorf("check active issue loop brake: %w", err)
+	}
+	if active != nil {
+		return active, nil
+	}
 	cfg, issue, err := s.activeLoopBrakeConfigForIssue(ctx, task.IssueID)
 	if err != nil || cfg == nil {
 		return nil, err
@@ -348,15 +355,26 @@ GROUP BY tu.provider, tu.model`, issueID, windowStart, windowEnd)
 
 func (s *TaskService) issueProgressSignalsSince(ctx context.Context, issueID pgtype.UUID, since time.Time) ([]string, error) {
 	signals := []string{}
-	var issueUpdated bool
-	if err := s.rawDB().QueryRow(ctx, `SELECT updated_at >= $2 FROM issue WHERE id = $1`, issueID, since).Scan(&issueUpdated); err != nil {
+	var statusChangeCount int
+	if err := s.rawDB().QueryRow(ctx, `
+SELECT count(*) FROM activity_log
+WHERE issue_id = $1
+  AND created_at >= $2
+  AND (
+    action = 'status_changed'
+    OR (action = 'issue_updated' AND COALESCE(details->>'status_changed', 'false') = 'true')
+  )`, issueID, since).Scan(&statusChangeCount); err != nil {
 		return nil, err
 	}
-	if issueUpdated {
-		signals = append(signals, "issue_status_or_field_update")
+	if statusChangeCount > 0 {
+		signals = append(signals, "issue_status_change")
 	}
 	var commentCount int
-	if err := s.rawDB().QueryRow(ctx, `SELECT count(*) FROM comment WHERE issue_id = $1 AND created_at >= $2`, issueID, since).Scan(&commentCount); err != nil {
+	if err := s.rawDB().QueryRow(ctx, `
+SELECT count(*) FROM comment
+WHERE issue_id = $1
+  AND created_at >= $2
+  AND author_type = 'member'`, issueID, since).Scan(&commentCount); err != nil {
 		return nil, err
 	}
 	if commentCount > 0 {

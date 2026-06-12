@@ -48,6 +48,7 @@ func init() {
 	skillCmd.GroupID = groupCore
 	squadCmd.GroupID = groupCore
 	spendCmd.GroupID = groupCore
+	teamTemplateCmd.GroupID = groupCore
 
 	// Runtime commands
 	daemonCmd.GroupID = groupRuntime
@@ -75,6 +76,7 @@ func init() {
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(spendCmd)
+	rootCmd.AddCommand(teamTemplateCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(runtimeCmd)
 	rootCmd.AddCommand(authCmd)

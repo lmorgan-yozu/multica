@@ -878,6 +878,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/{slug}", h.GetAgentTemplate)
 			})
 
+			// Team templates — exportable, versioned team snapshots for
+			// project intake (ADA-30). Human owner/admin only; the handler
+			// enforces the actor contract.
+			r.Route("/api/team-templates", func(r chi.Router) {
+				r.Get("/", h.ListTeamTemplates)
+				r.Post("/export", h.ExportTeamTemplate)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetTeamTemplate)
+					r.Get("/versions/{version}", h.GetTeamTemplateVersion)
+				})
+			})
+
 			// Skills
 			r.Route("/api/skills", func(r chi.Router) {
 				r.Get("/", h.ListSkills)

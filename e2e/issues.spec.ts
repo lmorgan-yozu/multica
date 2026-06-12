@@ -42,6 +42,10 @@ test.describe("Issues", () => {
     await expect(newIssueButton).toBeVisible();
     await newIssueButton.click();
 
+    // The dialog opens in agent quick-create mode by default (fresh
+    // browser context); the manual form is behind "Switch to Manual".
+    await page.getByRole("button", { name: "Switch to Manual" }).click();
+
     const title = "E2E Created " + Date.now();
     const titleInput = page.getByRole("textbox", { name: "Issue title" });
     await expect(titleInput).toBeVisible();
@@ -85,6 +89,7 @@ test.describe("Issues", () => {
   test("can dismiss issue creation", async ({ page }) => {
     await page.getByRole("button", { name: "New Issue" }).click();
 
+    await page.getByRole("button", { name: "Switch to Manual" }).click();
     const titleInput = page.getByRole("textbox", { name: "Issue title" });
     await expect(titleInput).toBeVisible();
 

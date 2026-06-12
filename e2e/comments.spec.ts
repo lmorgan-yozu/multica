@@ -24,20 +24,24 @@ test.describe("Comments", () => {
     await page.waitForURL(/\/issues\/[\w-]+/);
 
     // Wait for issue detail to load
-    await expect(page.locator("text=Properties")).toBeVisible();
+    await expect(page.getByText("Properties")).toBeVisible();
 
-    // Type a comment
+    // Type a comment into the rich-text editor (Tiptap contenteditable,
+    // exposed as a textbox named by its placeholder). The issue chat panel
+    // has its own editor + Send — the placeholder disambiguates.
     const commentText = "E2E comment " + Date.now();
-    const commentInput = page.locator(
-      'input[placeholder="Leave a comment..."]',
-    );
+    const commentInput = page.getByRole("textbox", {
+      name: "Leave a comment...",
+    });
+    await commentInput.click();
     await commentInput.fill(commentText);
 
-    // Submit the comment
-    await page.locator('form button[type="submit"]').last().click();
+    // Submit with the comment editor's keyboard shortcut — the page also
+    // carries the chat panel's Send button, so the shortcut is unambiguous.
+    await commentInput.press("ControlOrMeta+Enter");
 
-    // Comment should appear in the activity section
-    await expect(page.locator(`text=${commentText}`)).toBeVisible({
+    // Comment should appear in the activity section.
+    await expect(page.getByText(commentText).first()).toBeVisible({
       timeout: 5000,
     });
   });
@@ -48,10 +52,13 @@ test.describe("Comments", () => {
     await issueLink.click();
     await page.waitForURL(/\/issues\/[\w-]+/);
 
-    await expect(page.locator("text=Properties")).toBeVisible();
+    await expect(page.getByText("Properties")).toBeVisible();
 
-    // Submit button should be disabled when input is empty
-    const submitBtn = page.locator('form button[type="submit"]').last();
-    await expect(submitBtn).toBeDisabled();
+    // Submit button should be disabled when the editor is empty. The
+    // comment section renders before the chat panel, so first() is the
+    // comment Send.
+    await expect(
+      page.getByRole("button", { name: "Send" }).first(),
+    ).toBeDisabled();
   });
 });

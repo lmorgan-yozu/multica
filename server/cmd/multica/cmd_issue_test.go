@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -835,6 +836,240 @@ func TestFetchAutopilotCandidatesPaginates(t *testing.T) {
 	}
 	if got[len(got)-1].ID != "bbbbbbbb-0000-0000-0000-000000000000" {
 		t.Fatalf("last candidate = %#v", got[len(got)-1])
+	}
+}
+
+func newIssueFlowScanTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "flow-scan"}
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("project", "", "")
+	cmd.Flags().String("stale-window", "30m", "")
+	cmd.Flags().Int("limit", 200, "")
+	cmd.Flags().Bool("apply", false, "")
+	return cmd
+}
+
+func TestRunIssueFlowScanUsesExistingReadOnlyEndpoints(t *testing.T) {
+	now := time.Now().UTC()
+	staleUpdatedAt := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	var gotIssueQuery url.Values
+	var gotPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/issues":
+			gotIssueQuery = r.URL.Query()
+			json.NewEncoder(w).Encode(map[string]any{
+				"total": 2,
+				"issues": []map[string]any{
+					{
+						"id": "issue-active", "identifier": "ADA-1", "title": "Active work",
+						"status": "in_progress", "assignee_type": "agent", "assignee_id": "agent-a",
+						"updated_at": staleUpdatedAt,
+					},
+					{
+						"id": "issue-capped", "identifier": "ADA-2", "title": "Capped work",
+						"status": "in_progress", "assignee_type": "agent", "assignee_id": "agent-b",
+						"updated_at": staleUpdatedAt,
+					},
+				},
+			})
+		case "/api/issues/issue-active/task-runs":
+			json.NewEncoder(w).Encode([]map[string]any{{
+				"id": "task-active", "agent_id": "agent-a", "status": "queued",
+				"created_at": now.Add(-time.Hour).Format(time.RFC3339),
+			}})
+		case "/api/issues/issue-active/comments":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case "/api/issues/issue-capped/task-runs":
+			json.NewEncoder(w).Encode([]map[string]any{{
+				"id": "task-capped", "agent_id": "agent-b", "status": "running",
+				"created_at": now.Add(-time.Hour).Format(time.RFC3339),
+			}})
+		case "/api/issues/issue-capped/comments":
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case "/api/agents":
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": "agent-a", "name": "Agent A", "runtime_id": "runtime-a", "max_concurrent_tasks": 1},
+				{"id": "agent-b", "name": "Agent B", "runtime_id": "runtime-b", "max_concurrent_tasks": 1},
+			})
+		case "/api/runtimes":
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": "runtime-a", "status": "online"},
+				{"id": "runtime-b", "status": "online"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueFlowScanTestCmd()
+	_ = cmd.Flags().Set("project", "project-1")
+	_ = cmd.Flags().Set("stale-window", "30m")
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runIssueFlowScan(cmd, nil)
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("runIssueFlowScan: %v", err)
+	}
+	if gotIssueQuery.Get("status") != "in_progress" || gotIssueQuery.Get("project_id") != "project-1" {
+		t.Fatalf("issue query = %s, want status=in_progress and project_id=project-1", gotIssueQuery.Encode())
+	}
+	for _, path := range gotPaths {
+		if r := path; r != "/api/issues" && r != "/api/agents" && r != "/api/runtimes" &&
+			r != "/api/issues/issue-active/task-runs" && r != "/api/issues/issue-capped/task-runs" &&
+			r != "/api/issues/issue-active/comments" && r != "/api/issues/issue-capped/comments" {
+			t.Fatalf("unexpected path %s", r)
+		}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, string(out))
+	}
+	rows, _ := payload["issues"].([]any)
+	if len(rows) != 2 {
+		t.Fatalf("issues length = %d, want 2", len(rows))
+	}
+}
+
+func TestBuildIssueFlowScanRows(t *testing.T) {
+	now := time.Date(2026, 6, 11, 18, 0, 0, 0, time.UTC)
+	issues := []map[string]any{
+		{"id": "active", "identifier": "ADA-1", "title": "Active", "assignee_type": "agent", "assignee_id": "agent-a", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339)},
+		{"id": "stale", "identifier": "ADA-2", "title": "Stale", "assignee_type": "agent", "assignee_id": "agent-b", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339)},
+		{"id": "ambiguous", "identifier": "ADA-3", "title": "Ambiguous", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339)},
+		{"id": "waiting", "identifier": "ADA-4", "title": "Waiting", "assignee_type": "agent", "assignee_id": "agent-b", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339), "metadata": map[string]any{"waiting_on": "provider reset"}},
+		{"id": "offline", "identifier": "ADA-5", "title": "Offline", "assignee_type": "agent", "assignee_id": "agent-c", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339)},
+		{"id": "capped", "identifier": "ADA-6", "title": "Capped", "assignee_type": "agent", "assignee_id": "agent-d", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339)},
+		{"id": "commented", "identifier": "ADA-7", "title": "Commented", "assignee_type": "agent", "assignee_id": "agent-b", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339)},
+	}
+	tasks := map[string][]map[string]any{
+		"active": {{"id": "task-1", "agent_id": "agent-a", "status": "queued"}},
+		"other":  {{"id": "task-2", "agent_id": "agent-d", "status": "running"}},
+	}
+	agents := map[string]flowScanAgent{
+		"agent-a": {ID: "agent-a", Name: "Agent A", RuntimeID: "runtime-a", MaxConcurrentTasks: 2},
+		"agent-b": {ID: "agent-b", Name: "Agent B", RuntimeID: "runtime-b", MaxConcurrentTasks: 2},
+		"agent-c": {ID: "agent-c", Name: "Agent C", RuntimeID: "runtime-c", MaxConcurrentTasks: 2},
+		"agent-d": {ID: "agent-d", Name: "Agent D", RuntimeID: "runtime-d", MaxConcurrentTasks: 1},
+	}
+	runtimes := map[string]flowScanRuntime{
+		"runtime-a": {ID: "runtime-a", Status: "online"},
+		"runtime-b": {ID: "runtime-b", Status: "online"},
+		"runtime-c": {ID: "runtime-c", Status: "offline"},
+		"runtime-d": {ID: "runtime-d", Status: "online"},
+	}
+
+	comments := map[string][]map[string]any{
+		"commented": {{"id": "comment-1", "author_type": "agent", "type": "comment", "content": "Implemented and pushed the branch.", "created_at": now.Add(-10 * time.Minute).Format(time.RFC3339)}},
+		"offline":   {{"id": "comment-2", "author_type": "agent", "type": "comment", "content": "Flow scan detected stalled `in_progress` work, but no new work was started because capacity is unavailable: assignee runtime is not online.", "created_at": now.Add(-10 * time.Minute).Format(time.RFC3339)}},
+	}
+
+	rows := buildIssueFlowScanRows(issues, tasks, comments, agents, runtimes, now, 30*time.Minute)
+	if rows[0].State != "active" || rows[0].Recommendation != "leave_alone" {
+		t.Fatalf("active row = %#v, want active/leave_alone", rows[0])
+	}
+	if rows[1].State != "stale_capacity_available" || rows[1].Recommendation != "intervene" {
+		t.Fatalf("stale row = %#v, want stale_capacity_available/intervene", rows[1])
+	}
+	if rows[2].State != "ambiguous_routing" || rows[2].Recommendation != "record_ambiguity" {
+		t.Fatalf("ambiguous row = %#v, want ambiguous_routing/record_ambiguity", rows[2])
+	}
+	if rows[3].State != "waiting" || rows[3].Recommendation != "leave_alone" {
+		t.Fatalf("waiting row = %#v, want waiting/leave_alone", rows[3])
+	}
+	if rows[4].State != "no_capacity" || rows[4].Recommendation != "record_capacity" || rows[4].Reason != "assignee runtime is not online" {
+		t.Fatalf("offline row = %#v, want no_capacity/record_capacity for offline runtime", rows[4])
+	}
+	if rows[5].State != "no_capacity" || rows[5].Recommendation != "record_capacity" || rows[5].Reason != "assignee is at configured task capacity" {
+		t.Fatalf("capped row = %#v, want no_capacity/record_capacity for task cap", rows[5])
+	}
+	if rows[6].State != "recent_update" || rows[6].Recommendation != "leave_alone" || rows[6].Reason != "recent material issue comment inside stale window" {
+		t.Fatalf("commented row = %#v, want recent_update/leave_alone for recent material comment", rows[6])
+	}
+}
+
+func TestRunIssueFlowScanApplyRecordsAndRoutesActionableRows(t *testing.T) {
+	now := time.Now().UTC()
+	staleUpdatedAt := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	var commentPaths []string
+	var rerunPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues":
+			json.NewEncoder(w).Encode(map[string]any{
+				"total": 4,
+				"issues": []map[string]any{
+					{"id": "issue-stale", "identifier": "ADA-1", "title": "Stale", "status": "in_progress", "assignee_type": "agent", "assignee_id": "agent-a", "updated_at": staleUpdatedAt},
+					{"id": "issue-ambiguous", "identifier": "ADA-2", "title": "Ambiguous", "status": "in_progress", "updated_at": staleUpdatedAt},
+					{"id": "issue-offline", "identifier": "ADA-3", "title": "Offline", "status": "in_progress", "assignee_type": "agent", "assignee_id": "agent-b", "updated_at": staleUpdatedAt},
+					{"id": "issue-active", "identifier": "ADA-4", "title": "Active", "status": "in_progress", "assignee_type": "agent", "assignee_id": "agent-a", "updated_at": staleUpdatedAt},
+				},
+			})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/task-runs"):
+			if strings.Contains(r.URL.Path, "issue-active") {
+				json.NewEncoder(w).Encode([]map[string]any{{"id": "task-active", "agent_id": "agent-a", "status": "running"}})
+				return
+			}
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments"):
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/agents":
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": "agent-a", "name": "Agent A", "runtime_id": "runtime-a", "max_concurrent_tasks": 2},
+				{"id": "agent-b", "name": "Agent B", "runtime_id": "runtime-b", "max_concurrent_tasks": 2},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/runtimes":
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": "runtime-a", "status": "online"},
+				{"id": "runtime-b", "status": "offline"},
+			})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments"):
+			commentPaths = append(commentPaths, r.URL.Path)
+			json.NewEncoder(w).Encode(map[string]any{"id": fmt.Sprintf("comment-%d", len(commentPaths))})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/rerun"):
+			rerunPaths = append(rerunPaths, r.URL.Path)
+			json.NewEncoder(w).Encode(map[string]any{"id": "task-rerun", "agent_id": "agent-a", "status": "queued"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueFlowScanTestCmd()
+	_ = cmd.Flags().Set("apply", "true")
+	_ = cmd.Flags().Set("stale-window", "30m")
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runIssueFlowScan(cmd, nil)
+	_ = w.Close()
+	os.Stdout = old
+	_, _ = io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("runIssueFlowScan: %v", err)
+	}
+
+	if len(commentPaths) != 3 {
+		t.Fatalf("comment paths = %#v, want comments for stale, ambiguous, and no-capacity rows", commentPaths)
+	}
+	if len(rerunPaths) != 1 || rerunPaths[0] != "/api/issues/issue-stale/rerun" {
+		t.Fatalf("rerun paths = %#v, want only issue-stale re-enqueued", rerunPaths)
 	}
 }
 

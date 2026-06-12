@@ -377,6 +377,26 @@ multica issue status <id> in_progress
 
 Valid statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`.
 
+### Flow Scan
+
+```bash
+multica issue flow-scan --project <project-id> --output json
+multica issue flow-scan --project <project-id> --stale-window 45m
+multica issue flow-scan --project <project-id> --apply --output json
+```
+
+`flow-scan` is an orchestration aid for delivery leads. By default it is
+read-only: it scans `in_progress` issues, checks each issue's active task
+runs, recent material comments, agent capacity and runtime state, and
+classifies the row as `active`, `recent_update`,
+`stale_capacity_available`, `no_capacity`, or `ambiguous_routing`.
+
+With `--apply`, the command records actionable findings on the affected
+issues. Stale assigned work with available capacity is commented and
+re-enqueued for the assigned agent through the issue rerun path. Ambiguous
+routing and capacity waits are commented only; they are not marked blocked and
+no route is guessed.
+
 ### Comments
 
 ```bash

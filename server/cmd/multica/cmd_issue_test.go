@@ -1374,6 +1374,121 @@ func TestResolveAssigneeRespectsKinds(t *testing.T) {
 	})
 }
 
+func TestIssueGatesCommandPrintsActionableTable(t *testing.T) {
+	issueID := "11111111-2222-3333-4444-555555555555"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/ADA-21":
+			json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "ADA-21", "title": "Gate issue"})
+		case "/api/issues/" + issueID + "/quality-gates":
+			json.NewEncoder(w).Encode(map[string]any{
+				"enabled": true,
+				"gates": []map[string]any{{
+					"key":        "code_review",
+					"name":       "Code review",
+					"blocked":    true,
+					"complete":   false,
+					"next_actor": "Code Reviewer",
+					"reason":     "Code Reviewer must pass before moving from in_review to done",
+					"transition": map[string]any{"from": "in_review", "to": "done"},
+				}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE", "ws-1")
+
+	cmd := &cobra.Command{Use: "gates"}
+	cmd.Flags().String("output", "table", "")
+	out, err := captureStdout(t, func() error {
+		return runIssueGates(cmd, []string{"ADA-21"})
+	})
+	if err != nil {
+		t.Fatalf("run gates: %v", err)
+	}
+	for _, want := range []string{"code_review", "blocked", "Code Reviewer", "in_review -> done"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("gates table missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestIssueGateOverrideCommandPostsReason(t *testing.T) {
+	issueID := "11111111-2222-3333-4444-555555555555"
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/ADA-21":
+			json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "ADA-21", "title": "Gate issue"})
+		case "/api/issues/" + issueID + "/quality-gates/override":
+			if r.Method != http.MethodPost {
+				t.Fatalf("override method = %s, want POST", r.Method)
+			}
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Fatalf("decode override body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"issue": map[string]any{"id": issueID, "identifier": "ADA-21", "status": "done"},
+				"override": map[string]any{
+					"reason": "release blocked",
+					"skipped_gates": []map[string]any{{
+						"key":        "code_review",
+						"name":       "Code review",
+						"next_actor": "Code Reviewer",
+					}},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE", "ws-1")
+
+	cmd := &cobra.Command{Use: "gate-override"}
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("reason", "", "")
+	cmd.Flags().Bool("reason-stdin", false, "")
+	cmd.Flags().String("reason-file", "", "")
+	cmd.Flags().String("output", "json", "")
+	_ = cmd.Flags().Set("status", "done")
+	_ = cmd.Flags().Set("reason", "release blocked")
+
+	out, err := captureStdout(t, func() error {
+		return runIssueGateOverride(cmd, []string{"ADA-21"})
+	})
+	if err != nil {
+		t.Fatalf("run gate override: %v", err)
+	}
+	if gotBody["status"] != "done" || gotBody["reason"] != "release blocked" {
+		t.Fatalf("override body = %+v", gotBody)
+	}
+	if !strings.Contains(out, `"skipped_gates"`) || !strings.Contains(out, `"code_review"`) {
+		t.Fatalf("override JSON should include skipped gate audit data, got %s", out)
+	}
+}
+
+func TestIssueGateOverrideRequiresReasonFlag(t *testing.T) {
+	cmd := &cobra.Command{Use: "gate-override"}
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("reason", "", "")
+	cmd.Flags().Bool("reason-stdin", false, "")
+	cmd.Flags().String("reason-file", "", "")
+	cmd.Flags().String("output", "json", "")
+	_ = cmd.Flags().Set("status", "done")
+
+	err := runIssueGateOverride(cmd, []string{"ADA-21"})
+	if err == nil || !strings.Contains(err.Error(), "reason") {
+		t.Fatalf("expected missing reason error, got %v", err)
+	}
+}
+
 // TestResolveAssigneeExactMatchWins covers the substring-collision scenario from
 // multica-ai/multica#1620: when one name is a substring of another (e.g.
 // "reviewer" vs "peer-reviewer"), an exact match on the shorter name must

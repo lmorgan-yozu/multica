@@ -445,6 +445,50 @@ type IssueLabel struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type IssueLoopBrake struct {
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ProjectID         pgtype.UUID        `json:"project_id"`
+	State             string             `json:"state"`
+	Reason            string             `json:"reason"`
+	Evidence          []byte             `json:"evidence"`
+	WindowStartedAt   pgtype.Timestamptz `json:"window_started_at"`
+	WindowEndedAt     pgtype.Timestamptz `json:"window_ended_at"`
+	TriggeredAt       pgtype.Timestamptz `json:"triggered_at"`
+	TriggeredByTaskID pgtype.UUID        `json:"triggered_by_task_id"`
+	ClearedAt         pgtype.Timestamptz `json:"cleared_at"`
+	ClearedByType     pgtype.Text        `json:"cleared_by_type"`
+	ClearedByID       pgtype.UUID        `json:"cleared_by_id"`
+	ClearReason       pgtype.Text        `json:"clear_reason"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type IssueLoopBrakeAudit struct {
+	ID          pgtype.UUID        `json:"id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ActorType   string             `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+	Action      string             `json:"action"`
+	Reason      string             `json:"reason"`
+	Evidence    []byte             `json:"evidence"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type IssueLoopBrakeConfig struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
+	Enabled             bool               `json:"enabled"`
+	WindowMinutes       int32              `json:"window_minutes"`
+	MinRunCount         int32              `json:"min_run_count"`
+	MinTotalTokens      int64              `json:"min_total_tokens"`
+	MinEstimatedCostUsd pgtype.Numeric     `json:"min_estimated_cost_usd"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
 type IssuePullRequest struct {
 	IssueID       pgtype.UUID        `json:"issue_id"`
 	PullRequestID pgtype.UUID        `json:"pull_request_id"`
@@ -789,6 +833,29 @@ type TaskUsageHourlyRollupState struct {
 	LastRunFinishedAt pgtype.Timestamptz `json:"last_run_finished_at"`
 	LastRunRows       int64              `json:"last_run_rows"`
 	LastError         pgtype.Text        `json:"last_error"`
+}
+
+type TeamTemplate struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy  pgtype.UUID        `json:"archived_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TeamTemplateVersion struct {
+	ID                pgtype.UUID        `json:"id"`
+	TemplateID        pgtype.UUID        `json:"template_id"`
+	Version           int32              `json:"version"`
+	Manifest          []byte             `json:"manifest"`
+	SourceWorkspaceID pgtype.UUID        `json:"source_workspace_id"`
+	Notes             string             `json:"notes"`
+	CreatedBy         pgtype.UUID        `json:"created_by"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
 type User struct {

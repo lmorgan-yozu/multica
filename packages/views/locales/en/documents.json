@@ -1,0 +1,58 @@
+{
+  "comments": {
+    "title": "Comments",
+    "loading": "Loading comments...",
+    "empty": "No comments yet.",
+    "author_agent": "agent",
+    "author_member": "member",
+    "delete": "Delete",
+    "delete_aria": "Delete comment",
+    "placeholder": "Add a comment...",
+    "posting": "Posting...",
+    "post": "Post"
+  },
+  "versions": {
+    "unavailable": "Versions unavailable: {{error}}",
+    "loading": "Loading versions...",
+    "title": "Versions",
+    "version_label": "v{{version}}",
+    "version_with_notes": "v{{version}}: {{notes}}",
+    "view": "View",
+    "agent_suffix": "agent"
+  },
+  "viewer": {
+    "no_summary": "No summary yet.",
+    "summarising": "Summarising...",
+    "generate_summary": "Generate summary",
+    "summarise_empty_error": "No content available to summarise",
+    "load_failed": "Failed to load document: {{error}}",
+    "download_instead": "Download instead",
+    "loading": "Loading...",
+    "unsupported_type": "This document type ({{type}}) does not have an inline preview.",
+    "unknown_type": "unknown",
+    "download_file": "Download {{filename}}",
+    "curated_by_agent": "curated by agent"
+  },
+  "library": {
+    "issue_title": "Documents",
+    "project_title": "Project library",
+    "workspace_title": "Library",
+    "workspace_subtitle": "Everything produced in this workspace",
+    "loading": "Loading library...",
+    "load_failed": "Failed to load library: {{error}}",
+    "download_all_title": "Download all documents as a zip",
+    "preparing": "Preparing...",
+    "download_all": "Download all",
+    "empty_title": "No documents yet",
+    "empty_description": "Drop markdown, PDFs, images or text files onto a comment or attach them when you create an issue. They'll appear here, grouped by category, ready to browse.",
+    "search_placeholder": "Search documents",
+    "no_selected": "No document selected.",
+    "uncategorised": "Uncategorised",
+    "pinned": "pinned"
+  },
+  "tab": {
+    "label": "Library",
+    "open_aria_one": "Open document library ({{count}} document)",
+    "open_aria_other": "Open document library ({{count}} documents)"
+  }
+}

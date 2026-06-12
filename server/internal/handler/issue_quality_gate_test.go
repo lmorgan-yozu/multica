@@ -207,6 +207,52 @@ func TestIssueQualityGateOwnerOverrideRecordsAuditEvent(t *testing.T) {
 	}
 }
 
+func TestIssueQualityGateOwnerOverrideFromBacklogEnqueuesAssignee(t *testing.T) {
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "gate backlog assignee "+time.Now().Format(time.RFC3339Nano), nil)
+	projectID := createQualityGateProject(t, `{
+		"gates": [{
+			"key": "release_gate",
+			"name": "Release gate",
+			"order": 1,
+			"required_actor_type": "agent",
+			"required_role": "Code Reviewer",
+			"transition": {"from": "backlog", "to": "todo"}
+		}]
+	}`)
+	issueID := createQualityGateIssue(t, projectID, "backlog")
+	if _, err := testPool.Exec(ctx, `
+		UPDATE issue
+		SET assignee_type = 'agent', assignee_id = $2
+		WHERE id = $1
+	`, issueID, agentID); err != nil {
+		t.Fatalf("assign issue to agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+issueID+"/quality-gates/override", map[string]any{
+		"status": "todo",
+		"reason": "owner is unblocking queued implementation work",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.OverrideIssueQualityGate(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("owner override: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var taskCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, agentID).Scan(&taskCount); err != nil {
+		t.Fatalf("count queued issue tasks: %v", err)
+	}
+	if taskCount != 1 {
+		t.Fatalf("expected one queued task after backlog override, got %d", taskCount)
+	}
+}
+
 func TestIssueQualityGateOverrideRejectsUnauthorisedActors(t *testing.T) {
 	projectID := createQualityGateProject(t, `{
 		"gates": [{

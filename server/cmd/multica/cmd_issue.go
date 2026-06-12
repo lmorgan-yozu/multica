@@ -327,6 +327,7 @@ func init() {
 	issueFlowScanCmd.Flags().String("project", "", "Project ID")
 	issueFlowScanCmd.Flags().String("stale-window", "30m", "How long an in-progress issue may have no active task/update before it is stale")
 	issueFlowScanCmd.Flags().Int("limit", 200, "Maximum number of in-progress issues to scan")
+	issueFlowScanCmd.Flags().Bool("apply", false, "Record flow-scan findings and move stale assigned work back to todo")
 
 	// issue assign
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
@@ -582,7 +583,9 @@ func runIssueFlowScan(cmd *cobra.Command, _ []string) error {
 	}
 	issues := normalizeMapList(issueResp["issues"])
 
+	now := time.Now().UTC()
 	tasksByIssue := make(map[string][]map[string]any, len(issues))
+	commentsByIssue := make(map[string][]map[string]any, len(issues))
 	for _, issue := range issues {
 		issueID := strVal(issue, "id")
 		if issueID == "" {
@@ -593,6 +596,14 @@ func runIssueFlowScan(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("list task runs for %s: %w", issueDisplayKey(issue), err)
 		}
 		tasksByIssue[issueID] = runs
+
+		commentParams := url.Values{}
+		commentParams.Set("since", now.Add(-staleWindow).Format(time.RFC3339))
+		var comments []map[string]any
+		if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueID)+"/comments?"+commentParams.Encode(), &comments); err != nil {
+			return fmt.Errorf("list comments for %s: %w", issueDisplayKey(issue), err)
+		}
+		commentsByIssue[issueID] = comments
 	}
 
 	agents, err := fetchFlowScanAgents(ctx, client)
@@ -604,7 +615,12 @@ func runIssueFlowScan(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	rows := buildIssueFlowScanRows(issues, tasksByIssue, agents, runtimes, time.Now().UTC(), staleWindow)
+	rows := buildIssueFlowScanRows(issues, tasksByIssue, commentsByIssue, agents, runtimes, now, staleWindow)
+	if apply, _ := cmd.Flags().GetBool("apply"); apply {
+		if err := applyIssueFlowScanActions(ctx, client, rows); err != nil {
+			return err
+		}
+	}
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, map[string]any{
@@ -625,6 +641,38 @@ func runIssueFlowScan(cmd *cobra.Command, _ []string) error {
 		})
 	}
 	cli.PrintTable(os.Stdout, []string{"KEY", "STATE", "ASSIGNEE", "CAPACITY", "RUNTIME", "RECOMMENDATION", "REASON"}, tableRows)
+	return nil
+}
+
+func applyIssueFlowScanActions(ctx context.Context, client *cli.APIClient, rows []flowScanIssue) error {
+	for _, row := range rows {
+		switch row.Recommendation {
+		case "intervene":
+			if err := addFlowScanComment(ctx, client, row, fmt.Sprintf("Flow scan detected stalled `in_progress` work: %s. Moving this issue back to `todo` for the assigned agent to resume.", row.Reason)); err != nil {
+				return err
+			}
+			var result map[string]any
+			if err := client.PutJSON(ctx, "/api/issues/"+url.PathEscape(row.ID), map[string]any{"status": "todo"}, &result); err != nil {
+				return fmt.Errorf("move %s to todo: %w", row.Key, err)
+			}
+		case "record_ambiguity":
+			if err := addFlowScanComment(ctx, client, row, fmt.Sprintf("Flow scan detected stalled `in_progress` work but could not route it automatically: %s.", row.Reason)); err != nil {
+				return err
+			}
+		case "record_capacity":
+			if err := addFlowScanComment(ctx, client, row, fmt.Sprintf("Flow scan detected stalled `in_progress` work, but no new work was started because capacity is unavailable: %s.", row.Reason)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func addFlowScanComment(ctx context.Context, client *cli.APIClient, row flowScanIssue, content string) error {
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(row.ID)+"/comments", map[string]any{"content": content}, &result); err != nil {
+		return fmt.Errorf("record flow-scan finding for %s: %w", row.Key, err)
+	}
 	return nil
 }
 
@@ -680,7 +728,7 @@ func fetchFlowScanRuntimes(ctx context.Context, client *cli.APIClient) (map[stri
 	return runtimes, nil
 }
 
-func buildIssueFlowScanRows(issues []map[string]any, tasksByIssue map[string][]map[string]any, agents map[string]flowScanAgent, runtimes map[string]flowScanRuntime, now time.Time, staleWindow time.Duration) []flowScanIssue {
+func buildIssueFlowScanRows(issues []map[string]any, tasksByIssue map[string][]map[string]any, commentsByIssue map[string][]map[string]any, agents map[string]flowScanAgent, runtimes map[string]flowScanRuntime, now time.Time, staleWindow time.Duration) []flowScanIssue {
 	runningByAgent := map[string]int{}
 	for _, runs := range tasksByIssue {
 		for _, task := range runs {
@@ -734,6 +782,10 @@ func buildIssueFlowScanRows(issues []map[string]any, tasksByIssue map[string][]m
 			row.State = "recent_update"
 			row.Reason = "issue updated inside stale window"
 			row.Recommendation = "leave_alone"
+		case issueHasRecentMaterialComment(commentsByIssue[issueID], now, staleWindow):
+			row.State = "recent_update"
+			row.Reason = "recent material issue comment inside stale window"
+			row.Recommendation = "leave_alone"
 		case rt.Status != "online":
 			row.State = "no_capacity"
 			row.Reason = "assignee runtime is not online"
@@ -747,6 +799,41 @@ func buildIssueFlowScanRows(issues []map[string]any, tasksByIssue map[string][]m
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+func issueHasRecentMaterialComment(comments []map[string]any, now time.Time, window time.Duration) bool {
+	for _, comment := range comments {
+		authorType := strVal(comment, "author_type")
+		if authorType != "agent" && authorType != "member" {
+			continue
+		}
+		if strVal(comment, "type") == "system" {
+			continue
+		}
+		content := strings.TrimSpace(strVal(comment, "content"))
+		if content == "" || isNonMaterialFlowScanComment(content) {
+			continue
+		}
+		createdAt := strVal(comment, "created_at")
+		if createdAt == "" {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, createdAt)
+		if err != nil {
+			continue
+		}
+		if now.Sub(t) <= window {
+			return true
+		}
+	}
+	return false
+}
+
+func isNonMaterialFlowScanComment(content string) bool {
+	lower := strings.ToLower(content)
+	return strings.Contains(lower, "session limit") ||
+		strings.Contains(lower, "heartbeat") ||
+		strings.Contains(lower, "recurring digest")
 }
 
 func activeTaskIDsForAssignee(tasks []map[string]any, assigneeID string) []string {

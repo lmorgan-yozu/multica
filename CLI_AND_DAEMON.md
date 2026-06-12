@@ -382,16 +382,20 @@ Valid statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`
 ```bash
 multica issue flow-scan --project <project-id> --output json
 multica issue flow-scan --project <project-id> --stale-window 45m
+multica issue flow-scan --project <project-id> --apply --output json
 ```
 
-`flow-scan` is a read-only orchestration aid for delivery leads. It scans
-`in_progress` issues, checks each issue's active task runs, loads agent
-capacity and runtime state, and classifies the row as `active`,
-`recent_update`, `stale_capacity_available`, `no_capacity`, or
-`ambiguous_routing`. It never enqueues tasks or comments itself; callers use
-the recommendation field to decide whether to leave the issue alone, record a
-capacity wait, record ambiguity, or intervene through the normal issue
-assignment/status commands.
+`flow-scan` is an orchestration aid for delivery leads. By default it is
+read-only: it scans `in_progress` issues, checks each issue's active task
+runs, recent material comments, agent capacity and runtime state, and
+classifies the row as `active`, `recent_update`,
+`stale_capacity_available`, `no_capacity`, or `ambiguous_routing`.
+
+With `--apply`, the command records actionable findings on the affected
+issues. Stale assigned work with available capacity is commented and moved
+back to `todo` for the assigned agent to resume through the normal trigger
+path. Ambiguous routing and capacity waits are commented only; they are not
+marked blocked and no route is guessed.
 
 ### Comments
 

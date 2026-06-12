@@ -726,6 +726,7 @@ func newIssueFlowScanTestCmd() *cobra.Command {
 	cmd.Flags().String("project", "", "")
 	cmd.Flags().String("stale-window", "30m", "")
 	cmd.Flags().Int("limit", 200, "")
+	cmd.Flags().Bool("apply", false, "")
 	return cmd
 }
 
@@ -759,11 +760,15 @@ func TestRunIssueFlowScanUsesExistingReadOnlyEndpoints(t *testing.T) {
 				"id": "task-active", "agent_id": "agent-a", "status": "queued",
 				"created_at": now.Add(-time.Hour).Format(time.RFC3339),
 			}})
+		case "/api/issues/issue-active/comments":
+			json.NewEncoder(w).Encode([]map[string]any{})
 		case "/api/issues/issue-capped/task-runs":
 			json.NewEncoder(w).Encode([]map[string]any{{
 				"id": "task-capped", "agent_id": "agent-b", "status": "running",
 				"created_at": now.Add(-time.Hour).Format(time.RFC3339),
 			}})
+		case "/api/issues/issue-capped/comments":
+			json.NewEncoder(w).Encode([]map[string]any{})
 		case "/api/agents":
 			json.NewEncoder(w).Encode([]map[string]any{
 				{"id": "agent-a", "name": "Agent A", "runtime_id": "runtime-a", "max_concurrent_tasks": 1},
@@ -803,7 +808,8 @@ func TestRunIssueFlowScanUsesExistingReadOnlyEndpoints(t *testing.T) {
 	}
 	for _, path := range gotPaths {
 		if r := path; r != "/api/issues" && r != "/api/agents" && r != "/api/runtimes" &&
-			r != "/api/issues/issue-active/task-runs" && r != "/api/issues/issue-capped/task-runs" {
+			r != "/api/issues/issue-active/task-runs" && r != "/api/issues/issue-capped/task-runs" &&
+			r != "/api/issues/issue-active/comments" && r != "/api/issues/issue-capped/comments" {
 			t.Fatalf("unexpected path %s", r)
 		}
 	}
@@ -826,6 +832,7 @@ func TestBuildIssueFlowScanRows(t *testing.T) {
 		{"id": "waiting", "identifier": "ADA-4", "title": "Waiting", "assignee_type": "agent", "assignee_id": "agent-b", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339), "metadata": map[string]any{"waiting_on": "provider reset"}},
 		{"id": "offline", "identifier": "ADA-5", "title": "Offline", "assignee_type": "agent", "assignee_id": "agent-c", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339)},
 		{"id": "capped", "identifier": "ADA-6", "title": "Capped", "assignee_type": "agent", "assignee_id": "agent-d", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339)},
+		{"id": "commented", "identifier": "ADA-7", "title": "Commented", "assignee_type": "agent", "assignee_id": "agent-b", "updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339)},
 	}
 	tasks := map[string][]map[string]any{
 		"active": {{"id": "task-1", "agent_id": "agent-a", "status": "queued"}},
@@ -844,7 +851,11 @@ func TestBuildIssueFlowScanRows(t *testing.T) {
 		"runtime-d": {ID: "runtime-d", Status: "online"},
 	}
 
-	rows := buildIssueFlowScanRows(issues, tasks, agents, runtimes, now, 30*time.Minute)
+	comments := map[string][]map[string]any{
+		"commented": {{"id": "comment-1", "author_type": "agent", "type": "comment", "content": "Implemented and pushed the branch.", "created_at": now.Add(-10 * time.Minute).Format(time.RFC3339)}},
+	}
+
+	rows := buildIssueFlowScanRows(issues, tasks, comments, agents, runtimes, now, 30*time.Minute)
 	if rows[0].State != "active" || rows[0].Recommendation != "leave_alone" {
 		t.Fatalf("active row = %#v, want active/leave_alone", rows[0])
 	}
@@ -862,6 +873,93 @@ func TestBuildIssueFlowScanRows(t *testing.T) {
 	}
 	if rows[5].State != "no_capacity" || rows[5].Recommendation != "record_capacity" || rows[5].Reason != "assignee is at configured task capacity" {
 		t.Fatalf("capped row = %#v, want no_capacity/record_capacity for task cap", rows[5])
+	}
+	if rows[6].State != "recent_update" || rows[6].Recommendation != "leave_alone" || rows[6].Reason != "recent material issue comment inside stale window" {
+		t.Fatalf("commented row = %#v, want recent_update/leave_alone for recent material comment", rows[6])
+	}
+}
+
+func TestRunIssueFlowScanApplyRecordsAndRoutesActionableRows(t *testing.T) {
+	now := time.Now().UTC()
+	staleUpdatedAt := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	var commentPaths []string
+	var updated []struct {
+		path   string
+		status string
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues":
+			json.NewEncoder(w).Encode(map[string]any{
+				"total": 4,
+				"issues": []map[string]any{
+					{"id": "issue-stale", "identifier": "ADA-1", "title": "Stale", "status": "in_progress", "assignee_type": "agent", "assignee_id": "agent-a", "updated_at": staleUpdatedAt},
+					{"id": "issue-ambiguous", "identifier": "ADA-2", "title": "Ambiguous", "status": "in_progress", "updated_at": staleUpdatedAt},
+					{"id": "issue-offline", "identifier": "ADA-3", "title": "Offline", "status": "in_progress", "assignee_type": "agent", "assignee_id": "agent-b", "updated_at": staleUpdatedAt},
+					{"id": "issue-active", "identifier": "ADA-4", "title": "Active", "status": "in_progress", "assignee_type": "agent", "assignee_id": "agent-a", "updated_at": staleUpdatedAt},
+				},
+			})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/task-runs"):
+			if strings.Contains(r.URL.Path, "issue-active") {
+				json.NewEncoder(w).Encode([]map[string]any{{"id": "task-active", "agent_id": "agent-a", "status": "running"}})
+				return
+			}
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments"):
+			json.NewEncoder(w).Encode([]map[string]any{})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/agents":
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": "agent-a", "name": "Agent A", "runtime_id": "runtime-a", "max_concurrent_tasks": 2},
+				{"id": "agent-b", "name": "Agent B", "runtime_id": "runtime-b", "max_concurrent_tasks": 2},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/runtimes":
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": "runtime-a", "status": "online"},
+				{"id": "runtime-b", "status": "offline"},
+			})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments"):
+			commentPaths = append(commentPaths, r.URL.Path)
+			json.NewEncoder(w).Encode(map[string]any{"id": fmt.Sprintf("comment-%d", len(commentPaths))})
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/api/issues/"):
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode update body: %v", err)
+			}
+			updated = append(updated, struct {
+				path   string
+				status string
+			}{path: r.URL.Path, status: strVal(body, "status")})
+			json.NewEncoder(w).Encode(map[string]any{"id": strings.TrimPrefix(r.URL.Path, "/api/issues/"), "status": body["status"]})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueFlowScanTestCmd()
+	_ = cmd.Flags().Set("apply", "true")
+	_ = cmd.Flags().Set("stale-window", "30m")
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runIssueFlowScan(cmd, nil)
+	_ = w.Close()
+	os.Stdout = old
+	_, _ = io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("runIssueFlowScan: %v", err)
+	}
+
+	if len(commentPaths) != 3 {
+		t.Fatalf("comment paths = %#v, want comments for stale, ambiguous, and no-capacity rows", commentPaths)
+	}
+	if len(updated) != 1 || updated[0].path != "/api/issues/issue-stale" || updated[0].status != "todo" {
+		t.Fatalf("updates = %#v, want only issue-stale moved to todo", updated)
 	}
 }
 

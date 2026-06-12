@@ -392,10 +392,10 @@ classifies the row as `active`, `recent_update`,
 `stale_capacity_available`, `no_capacity`, or `ambiguous_routing`.
 
 With `--apply`, the command records actionable findings on the affected
-issues. Stale assigned work with available capacity is commented and moved
-back to `todo` for the assigned agent to resume through the normal trigger
-path. Ambiguous routing and capacity waits are commented only; they are not
-marked blocked and no route is guessed.
+issues. Stale assigned work with available capacity is commented and
+re-enqueued for the assigned agent through the issue rerun path. Ambiguous
+routing and capacity waits are commented only; they are not marked blocked and
+no route is guessed.
 
 ### Comments
 

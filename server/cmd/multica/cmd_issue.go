@@ -327,7 +327,7 @@ func init() {
 	issueFlowScanCmd.Flags().String("project", "", "Project ID")
 	issueFlowScanCmd.Flags().String("stale-window", "30m", "How long an in-progress issue may have no active task/update before it is stale")
 	issueFlowScanCmd.Flags().Int("limit", 200, "Maximum number of in-progress issues to scan")
-	issueFlowScanCmd.Flags().Bool("apply", false, "Record flow-scan findings and move stale assigned work back to todo")
+	issueFlowScanCmd.Flags().Bool("apply", false, "Record flow-scan findings and re-enqueue stale assigned work")
 
 	// issue assign
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
@@ -648,12 +648,12 @@ func applyIssueFlowScanActions(ctx context.Context, client *cli.APIClient, rows 
 	for _, row := range rows {
 		switch row.Recommendation {
 		case "intervene":
-			if err := addFlowScanComment(ctx, client, row, fmt.Sprintf("Flow scan detected stalled `in_progress` work: %s. Moving this issue back to `todo` for the assigned agent to resume.", row.Reason)); err != nil {
+			if err := addFlowScanComment(ctx, client, row, fmt.Sprintf("Flow scan detected stalled `in_progress` work: %s. Re-enqueuing the assigned agent to resume.", row.Reason)); err != nil {
 				return err
 			}
 			var result map[string]any
-			if err := client.PutJSON(ctx, "/api/issues/"+url.PathEscape(row.ID), map[string]any{"status": "todo"}, &result); err != nil {
-				return fmt.Errorf("move %s to todo: %w", row.Key, err)
+			if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(row.ID)+"/rerun", map[string]any{}, &result); err != nil {
+				return fmt.Errorf("re-enqueue %s: %w", row.Key, err)
 			}
 		case "record_ambiguity":
 			if err := addFlowScanComment(ctx, client, row, fmt.Sprintf("Flow scan detected stalled `in_progress` work but could not route it automatically: %s.", row.Reason)); err != nil {
@@ -832,6 +832,7 @@ func issueHasRecentMaterialComment(comments []map[string]any, now time.Time, win
 func isNonMaterialFlowScanComment(content string) bool {
 	lower := strings.ToLower(content)
 	return strings.Contains(lower, "session limit") ||
+		strings.Contains(lower, "flow scan detected") ||
 		strings.Contains(lower, "heartbeat") ||
 		strings.Contains(lower, "recurring digest")
 }

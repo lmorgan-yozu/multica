@@ -853,6 +853,7 @@ func TestBuildIssueFlowScanRows(t *testing.T) {
 
 	comments := map[string][]map[string]any{
 		"commented": {{"id": "comment-1", "author_type": "agent", "type": "comment", "content": "Implemented and pushed the branch.", "created_at": now.Add(-10 * time.Minute).Format(time.RFC3339)}},
+		"offline":   {{"id": "comment-2", "author_type": "agent", "type": "comment", "content": "Flow scan detected stalled `in_progress` work, but no new work was started because capacity is unavailable: assignee runtime is not online.", "created_at": now.Add(-10 * time.Minute).Format(time.RFC3339)}},
 	}
 
 	rows := buildIssueFlowScanRows(issues, tasks, comments, agents, runtimes, now, 30*time.Minute)
@@ -883,10 +884,7 @@ func TestRunIssueFlowScanApplyRecordsAndRoutesActionableRows(t *testing.T) {
 	now := time.Now().UTC()
 	staleUpdatedAt := now.Add(-2 * time.Hour).Format(time.RFC3339)
 	var commentPaths []string
-	var updated []struct {
-		path   string
-		status string
-	}
+	var rerunPaths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/issues":
@@ -920,16 +918,9 @@ func TestRunIssueFlowScanApplyRecordsAndRoutesActionableRows(t *testing.T) {
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments"):
 			commentPaths = append(commentPaths, r.URL.Path)
 			json.NewEncoder(w).Encode(map[string]any{"id": fmt.Sprintf("comment-%d", len(commentPaths))})
-		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/api/issues/"):
-			var body map[string]any
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode update body: %v", err)
-			}
-			updated = append(updated, struct {
-				path   string
-				status string
-			}{path: r.URL.Path, status: strVal(body, "status")})
-			json.NewEncoder(w).Encode(map[string]any{"id": strings.TrimPrefix(r.URL.Path, "/api/issues/"), "status": body["status"]})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/rerun"):
+			rerunPaths = append(rerunPaths, r.URL.Path)
+			json.NewEncoder(w).Encode(map[string]any{"id": "task-rerun", "agent_id": "agent-a", "status": "queued"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -958,8 +949,8 @@ func TestRunIssueFlowScanApplyRecordsAndRoutesActionableRows(t *testing.T) {
 	if len(commentPaths) != 3 {
 		t.Fatalf("comment paths = %#v, want comments for stale, ambiguous, and no-capacity rows", commentPaths)
 	}
-	if len(updated) != 1 || updated[0].path != "/api/issues/issue-stale" || updated[0].status != "todo" {
-		t.Fatalf("updates = %#v, want only issue-stale moved to todo", updated)
+	if len(rerunPaths) != 1 || rerunPaths[0] != "/api/issues/issue-stale/rerun" {
+		t.Fatalf("rerun paths = %#v, want only issue-stale re-enqueued", rerunPaths)
 	}
 }
 

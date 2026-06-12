@@ -1,0 +1,57 @@
+{
+  "comments": {
+    "title": "댓글",
+    "loading": "댓글을 불러오는 중...",
+    "empty": "아직 댓글이 없습니다.",
+    "author_agent": "에이전트",
+    "author_member": "멤버",
+    "delete": "삭제",
+    "delete_aria": "댓글 삭제",
+    "placeholder": "댓글 추가...",
+    "posting": "게시 중...",
+    "post": "게시"
+  },
+  "versions": {
+    "unavailable": "버전을 사용할 수 없습니다: {{error}}",
+    "loading": "버전을 불러오는 중...",
+    "title": "버전",
+    "version_label": "v{{version}}",
+    "version_with_notes": "v{{version}}: {{notes}}",
+    "view": "보기",
+    "agent_suffix": "에이전트"
+  },
+  "viewer": {
+    "no_summary": "아직 요약이 없습니다.",
+    "summarising": "요약 중...",
+    "generate_summary": "요약 생성",
+    "summarise_empty_error": "요약할 콘텐츠가 없습니다",
+    "load_failed": "문서를 불러오지 못했습니다: {{error}}",
+    "download_instead": "대신 다운로드",
+    "loading": "불러오는 중...",
+    "unsupported_type": "이 문서 유형({{type}})은 인라인 미리보기를 지원하지 않습니다.",
+    "unknown_type": "알 수 없음",
+    "download_file": "{{filename}} 다운로드",
+    "curated_by_agent": "에이전트가 큐레이션함"
+  },
+  "library": {
+    "issue_title": "문서",
+    "project_title": "프로젝트 라이브러리",
+    "workspace_title": "라이브러리",
+    "workspace_subtitle": "이 워크스페이스에서 생성된 모든 것",
+    "loading": "라이브러리를 불러오는 중...",
+    "load_failed": "라이브러리를 불러오지 못했습니다: {{error}}",
+    "download_all_title": "모든 문서를 zip으로 다운로드",
+    "preparing": "준비 중...",
+    "download_all": "모두 다운로드",
+    "empty_title": "아직 문서가 없습니다",
+    "empty_description": "Markdown, PDF, 이미지 또는 텍스트 파일을 댓글에 놓거나 이슈를 만들 때 첨부하세요. 여기에서 카테고리별로 묶여 탐색할 수 있습니다.",
+    "search_placeholder": "문서 검색",
+    "no_selected": "선택된 문서가 없습니다.",
+    "uncategorised": "분류 없음",
+    "pinned": "고정됨"
+  },
+  "tab": {
+    "label": "라이브러리",
+    "open_aria_other": "문서 라이브러리 열기({{count}}개 문서)"
+  }
+}

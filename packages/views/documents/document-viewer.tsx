@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { api } from "@multica/core/api";
 import type { Document } from "@multica/core/types";
 import { Markdown } from "../common/markdown";
+import { useT } from "../i18n";
 import { DocumentComments } from "./document-comments";
 import { DocumentVersions } from "./document-versions";
 
@@ -62,6 +63,7 @@ export function DocumentViewer({
   showComments = true,
   showSummariseAction = true,
 }: DocumentViewerProps): React.JSX.Element {
+  const { t } = useT("documents");
   const [textContent, setTextContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -88,7 +90,7 @@ export function DocumentViewer({
       const heuristic = firstHeading
         ? firstHeading.replace(/^#{1,3}\s+/, "")
         : firstPara.slice(0, 280);
-      if (!heuristic) throw new Error("No content available to summarise");
+      if (!heuristic) throw new Error(t(($) => $.viewer.summarise_empty_error));
       await api.updateDocumentCuration(document.attachment_id, { summary: heuristic });
       setLocalSummary(heuristic);
     } catch (e) {
@@ -136,7 +138,9 @@ export function DocumentViewer({
           {title}
           {document.version_number && document.version_number > 1 && (
             <span className="ml-2 text-xs font-normal text-muted-foreground">
-              v{document.version_number}
+              {t(($) => $.versions.version_label, {
+                version: document.version_number,
+              })}
             </span>
           )}
         </h1>
@@ -144,23 +148,39 @@ export function DocumentViewer({
           <p className="mt-1 text-sm text-muted-foreground">{displaySummary}</p>
         ) : showSummariseAction && isText ? (
           <div className="mt-1 flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">No summary yet.</span>
+            <span className="text-muted-foreground">{t(($) => $.viewer.no_summary)}</span>
             <button
               type="button"
               className="rounded-md border border-border px-2 py-0.5 text-xs hover:bg-muted disabled:opacity-50"
               onClick={onGenerateSummary}
               disabled={summarising || textContent === null}
             >
-              {summarising ? "Summarising…" : "Generate summary"}
+              {summarising
+                ? t(($) => $.viewer.summarising)
+                : t(($) => $.viewer.generate_summary)}
             </button>
             {summariseError && <span className="text-destructive">{summariseError}</span>}
           </div>
         ) : null}
-        <DocumentMetaRow document={document} />
+        <DocumentMetaRow document={document} curatedByAgentLabel={t(($) => $.viewer.curated_by_agent)} />
       </header>
 
       <div className="prose prose-sm max-w-none dark:prose-invert">
-        {renderContent({ document, textContent, loading, error, isText })}
+        {renderContent({
+          document,
+          textContent,
+          loading,
+          error,
+          isText,
+          labels: {
+            loadFailed: (message) => t(($) => $.viewer.load_failed, { error: message }),
+            downloadInstead: t(($) => $.viewer.download_instead),
+            loading: t(($) => $.viewer.loading),
+            unsupportedType: (type) => t(($) => $.viewer.unsupported_type, { type }),
+            unknownType: t(($) => $.viewer.unknown_type),
+            downloadFile: (filename) => t(($) => $.viewer.download_file, { filename }),
+          },
+        })}
       </div>
 
       {showVersions && (
@@ -184,17 +204,25 @@ function renderContent(args: {
   loading: boolean;
   error: string | null;
   isText: boolean;
+  labels: {
+    loadFailed: (message: string) => string;
+    downloadInstead: string;
+    loading: string;
+    unsupportedType: (type: string) => string;
+    unknownType: string;
+    downloadFile: (filename: string) => string;
+  };
 }): React.ReactNode {
-  const { document, textContent, loading, error, isText } = args;
+  const { document, textContent, loading, error, isText, labels } = args;
   const ct = document.content_type.toLowerCase();
 
   if (error) {
     return (
       <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-        Failed to load document: {error}
+        {labels.loadFailed(error)}
         <div className="mt-2">
           <a className="underline" href={document.download_url} target="_blank" rel="noreferrer">
-            Download instead
+            {labels.downloadInstead}
           </a>
         </div>
       </div>
@@ -222,7 +250,7 @@ function renderContent(args: {
   }
 
   if (isText) {
-    if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>;
+    if (loading) return <div className="text-sm text-muted-foreground">{labels.loading}</div>;
     if (textContent === null) return null;
     if (isMarkdown(document.content_type, document.filename)) {
       // 'full' mode renders proper headings, tables, blockquotes, and
@@ -239,25 +267,31 @@ function renderContent(args: {
   // Fallback: offer a download.
   return (
     <div className="rounded-md border border-border bg-muted/40 p-4 text-sm">
-      <p>This document type ({document.content_type || "unknown"}) does not have an inline preview.</p>
+      <p>{labels.unsupportedType(document.content_type || labels.unknownType)}</p>
       <a
         className="mt-2 inline-block text-brand underline"
         href={document.download_url}
         target="_blank"
         rel="noreferrer"
       >
-        Download {document.filename}
+        {labels.downloadFile(document.filename)}
       </a>
     </div>
   );
 }
 
-function DocumentMetaRow({ document }: { document: Document }): React.JSX.Element {
+function DocumentMetaRow({
+  document,
+  curatedByAgentLabel,
+}: {
+  document: Document;
+  curatedByAgentLabel: string;
+}): React.JSX.Element {
   const parts: string[] = [];
   if (document.category) parts.push(document.category);
   parts.push(humanSize(document.size_bytes));
   parts.push(new Date(document.created_at).toLocaleDateString());
-  if (document.curator_type === "agent") parts.push("curated by agent");
+  if (document.curator_type === "agent") parts.push(curatedByAgentLabel);
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

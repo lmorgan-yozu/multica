@@ -9,6 +9,7 @@ import * as React from "react";
 import { useEffect, useState } from "react";
 import { api } from "@multica/core/api";
 import type { ProjectLibrary as ProjectLibraryData, ProjectLibraryDocument } from "@multica/core/types";
+import { useT } from "../i18n";
 import { LibraryShell } from "./library-shell";
 
 interface WorkspaceLibraryProps {
@@ -20,6 +21,7 @@ export function WorkspaceLibrary({
   title,
   subtitle,
 }: WorkspaceLibraryProps): React.JSX.Element {
+  const { t } = useT("documents");
   const [data, setData] = useState<ProjectLibraryData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -44,12 +46,12 @@ export function WorkspaceLibrary({
   }, []);
 
   if (loading) {
-    return <div className="p-6 text-sm text-muted-foreground">Loading library…</div>;
+    return <div className="p-6 text-sm text-muted-foreground">{t(($) => $.library.loading)}</div>;
   }
   if (error) {
     return (
       <div className="p-6 text-sm text-destructive">
-        Failed to load library: {error}
+        {t(($) => $.library.load_failed, { error })}
       </div>
     );
   }
@@ -57,8 +59,8 @@ export function WorkspaceLibrary({
 
   return (
     <LibraryShell<ProjectLibraryDocument>
-      title={title ?? "Library"}
-      subtitle={subtitle ?? "Everything produced in this workspace"}
+      title={title ?? t(($) => $.library.workspace_title)}
+      subtitle={subtitle ?? t(($) => $.library.workspace_subtitle)}
       documents={data.documents}
       sections={data.sections}
       exportUrl={api.exportWorkspaceLibraryUrl()}

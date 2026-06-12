@@ -107,6 +107,152 @@ func TestIssueQualityGateRejectsMissingRequiredActor(t *testing.T) {
 	}
 }
 
+func TestIssueQualityGateOwnerOverrideRequiresReason(t *testing.T) {
+	projectID := createQualityGateProject(t, `{
+		"gates": [{
+			"key": "code_review",
+			"name": "Code review",
+			"order": 1,
+			"required_actor_type": "agent",
+			"required_role": "Code Reviewer",
+			"transition": {"from": "in_review", "to": "done"}
+		}]
+	}`)
+	issueID := createQualityGateIssue(t, projectID, "in_review")
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+issueID+"/quality-gates/override", map[string]any{"status": "done"})
+	req = withURLParam(req, "id", issueID)
+	testHandler.OverrideIssueQualityGate(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("override without reason: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "reason") {
+		t.Fatalf("missing reason error should be actionable, got %s", w.Body.String())
+	}
+}
+
+func TestIssueQualityGateOwnerOverrideRecordsAuditEvent(t *testing.T) {
+	projectID := createQualityGateProject(t, `{
+		"gates": [{
+			"key": "code_review",
+			"name": "Code review",
+			"order": 1,
+			"required_actor_type": "agent",
+			"required_role": "Code Reviewer",
+			"transition": {"from": "in_review", "to": "done"}
+		}]
+	}`)
+	issueID := createQualityGateIssue(t, projectID, "in_review")
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/"+issueID+"/quality-gates/override", map[string]any{
+		"status": "done",
+		"reason": "release is blocked and owner accepted the risk",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.OverrideIssueQualityGate(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("owner override: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Issue struct {
+			Status string `json:"status"`
+		} `json:"issue"`
+		Override struct {
+			Reason       string `json:"reason"`
+			SkippedGates []struct {
+				Key       string `json:"key"`
+				Name      string `json:"name"`
+				NextActor string `json:"next_actor"`
+			} `json:"skipped_gates"`
+		} `json:"override"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode override response: %v", err)
+	}
+	if resp.Issue.Status != "done" || resp.Override.Reason == "" || len(resp.Override.SkippedGates) != 1 {
+		t.Fatalf("override response should include issue and skipped gate, got %+v", resp)
+	}
+	if resp.Override.SkippedGates[0].Key != "code_review" || resp.Override.SkippedGates[0].NextActor != "Code Reviewer" {
+		t.Fatalf("skipped gate should name reviewer gate, got %+v", resp.Override.SkippedGates[0])
+	}
+
+	var gateEvents int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM issue_quality_gate_event
+		WHERE issue_id = $1 AND gate_key = 'code_review' AND actor_type = 'member' AND actor_id = $2
+	`, issueID, testUserID).Scan(&gateEvents); err != nil {
+		t.Fatalf("count override gate event: %v", err)
+	}
+	if gateEvents != 1 {
+		t.Fatalf("expected one override gate event, got %d", gateEvents)
+	}
+
+	var details string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT details::text
+		FROM activity_log
+		WHERE issue_id = $1 AND action = 'quality_gate_override'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID).Scan(&details); err != nil {
+		t.Fatalf("load override activity: %v", err)
+	}
+	for _, want := range []string{"release is blocked", "code_review", "Code review", "in_review", "done"} {
+		if !strings.Contains(details, want) {
+			t.Fatalf("override activity details missing %q: %s", want, details)
+		}
+	}
+}
+
+func TestIssueQualityGateOverrideRejectsUnauthorisedActors(t *testing.T) {
+	projectID := createQualityGateProject(t, `{
+		"gates": [{
+			"key": "code_review",
+			"name": "Code review",
+			"order": 1,
+			"required_actor_type": "agent",
+			"required_role": "Code Reviewer",
+			"transition": {"from": "in_review", "to": "done"}
+		}]
+	}`)
+	memberID := createQualityGateMember(t, "member")
+
+	t.Run("plain member", func(t *testing.T) {
+		issueID := createQualityGateIssue(t, projectID, "in_review")
+		w := httptest.NewRecorder()
+		req := newRequestAs(memberID, "POST", "/api/issues/"+issueID+"/quality-gates/override", map[string]any{
+			"status": "done",
+			"reason": "trying without owner role",
+		})
+		req = withURLParam(req, "id", issueID)
+		testHandler.OverrideIssueQualityGate(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("member override: expected 403, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("agent task actor", func(t *testing.T) {
+		issueID := createQualityGateIssue(t, projectID, "in_review")
+		agentID := createHandlerTestAgent(t, "gate override agent "+time.Now().Format(time.RFC3339Nano), nil)
+		taskID := createHandlerTestTaskForAgentOnIssue(t, agentID, issueID)
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/"+issueID+"/quality-gates/override", map[string]any{
+			"status": "done",
+			"reason": "agent should not override",
+		})
+		req = withURLParam(req, "id", issueID)
+		req.Header.Set("X-Agent-ID", agentID)
+		req.Header.Set("X-Task-ID", taskID)
+		testHandler.OverrideIssueQualityGate(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("agent override: expected 403, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+}
+
 func TestIssueQualityGateBatchUpdateUsesSameEnforcement(t *testing.T) {
 	projectID := createQualityGateProject(t, `{
 		"gates": [{
@@ -294,4 +440,27 @@ func seedCompletedTask(t *testing.T, issueID, agentID string) {
 	`, agentID, handlerTestRuntimeID(t), issueID); err != nil {
 		t.Fatalf("seed completed task: %v", err)
 	}
+}
+
+func createQualityGateMember(t *testing.T, role string) string {
+	t.Helper()
+	var userID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO "user" (name, email)
+		VALUES ($1, $2)
+		RETURNING id
+	`, "gate "+role+" "+time.Now().Format(time.RFC3339Nano), "gate-"+role+"-"+time.Now().Format("20060102150405.000000000")+"@example.com").Scan(&userID); err != nil {
+		t.Fatalf("create gate user: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, $3)
+	`, testWorkspaceID, userID, role); err != nil {
+		t.Fatalf("create gate member: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, userID)
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
+	})
+	return userID
 }

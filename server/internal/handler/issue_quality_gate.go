@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type qualityGateConfig struct {
@@ -42,6 +43,18 @@ type qualityGateProjectState struct {
 type qualityGateDecision struct {
 	Gate   qualityGate
 	Reason string
+}
+
+type qualityGateOverrideRequest struct {
+	Status string `json:"status"`
+	Reason string `json:"reason"`
+}
+
+type skippedQualityGateResponse struct {
+	Key        string                `json:"key"`
+	Name       string                `json:"name"`
+	Transition qualityGateTransition `json:"transition"`
+	NextActor  string                `json:"next_actor"`
 }
 
 func normalizeProjectQualityGateConfig(raw json.RawMessage) []byte {
@@ -188,6 +201,27 @@ func (h *Handler) issueQualityGateEventExists(ctx context.Context, issueID pgtyp
 	return exists, err
 }
 
+func (h *Handler) skippedQualityGatesForTransition(ctx context.Context, issue db.Issue, toStatus string) ([]qualityGate, qualityGateProjectState, bool, error) {
+	state, enabled, err := h.loadIssueQualityGateProjectState(ctx, issue)
+	if err != nil || !enabled {
+		return nil, state, enabled, err
+	}
+	var skipped []qualityGate
+	for _, gate := range state.Config.Gates {
+		if gate.Transition.To != toStatus {
+			continue
+		}
+		exists, err := h.issueQualityGateEventExists(ctx, issue.ID, gate)
+		if err != nil {
+			return nil, state, enabled, err
+		}
+		if !exists {
+			skipped = append(skipped, gate)
+		}
+	}
+	return skipped, state, true, nil
+}
+
 func (h *Handler) agentMateriallyImplementedIssue(ctx context.Context, issue db.Issue, agentID string) (bool, error) {
 	var exists bool
 	err := h.DB.QueryRow(ctx, `
@@ -222,6 +256,19 @@ func (h *Handler) recordIssueQualityGateEvents(ctx context.Context, issue db.Iss
 			slog.Warn("record issue quality gate event failed", "issue_id", uuidToString(issue.ID), "gate_key", gate.Key, "error", err)
 		}
 	}
+}
+
+func qualityGateResponses(gates []qualityGate) []skippedQualityGateResponse {
+	resp := make([]skippedQualityGateResponse, 0, len(gates))
+	for _, gate := range gates {
+		resp = append(resp, skippedQualityGateResponse{
+			Key:        gate.Key,
+			Name:       gate.Name,
+			Transition: gate.Transition,
+			NextActor:  gateRole(gate),
+		})
+	}
+	return resp
 }
 
 func gateRole(gate qualityGate) string {
@@ -324,6 +371,151 @@ func (h *Handler) GetIssueQualityGates(w http.ResponseWriter, r *http.Request) {
 		"project_id": uuidToString(state.ProjectID),
 		"issue_id":   uuidToString(issue.ID),
 		"gates":      gates,
+	})
+}
+
+func (h *Handler) OverrideIssueQualityGate(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	prevIssue, ok := h.loadIssueForUser(w, r, id)
+	if !ok {
+		return
+	}
+	workspaceID := uuidToString(prevIssue.WorkspaceID)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if actorType != "member" {
+		writeError(w, http.StatusForbidden, "quality gate override requires a workspace owner or admin")
+		return
+	}
+	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
+		return
+	}
+
+	var req qualityGateOverrideRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.Status = strings.TrimSpace(req.Status)
+	req.Reason = strings.TrimSpace(req.Reason)
+	if req.Status == "" {
+		writeError(w, http.StatusBadRequest, "status is required")
+		return
+	}
+	if !isValidIssueStatus(req.Status) {
+		writeError(w, http.StatusBadRequest, "invalid status")
+		return
+	}
+	if req.Reason == "" {
+		writeError(w, http.StatusBadRequest, "override reason is required")
+		return
+	}
+	if req.Status == prevIssue.Status {
+		writeError(w, http.StatusBadRequest, "status is unchanged")
+		return
+	}
+
+	skipped, _, enabled, err := h.skippedQualityGatesForTransition(r.Context(), prevIssue, req.Status)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load quality gate state")
+		return
+	}
+	if !enabled || len(skipped) == 0 {
+		writeError(w, http.StatusConflict, "no quality gate is blocking this transition; use normal issue status update")
+		return
+	}
+
+	details, err := json.Marshal(map[string]any{
+		"reason":        req.Reason,
+		"from_status":   prevIssue.Status,
+		"to_status":     req.Status,
+		"skipped_gates": qualityGateResponses(skipped),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode quality gate override")
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to override quality gate")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	issue, err := qtx.UpdateIssue(r.Context(), db.UpdateIssueParams{
+		ID:            prevIssue.ID,
+		Status:        pgtype.Text{String: req.Status, Valid: true},
+		AssigneeType:  prevIssue.AssigneeType,
+		AssigneeID:    prevIssue.AssigneeID,
+		StartDate:     prevIssue.StartDate,
+		DueDate:       prevIssue.DueDate,
+		ParentIssueID: prevIssue.ParentIssueID,
+		ProjectID:     prevIssue.ProjectID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to override quality gate")
+		return
+	}
+
+	var actorUUID pgtype.UUID
+	if actorID != "" {
+		actorUUID = parseUUID(actorID)
+	}
+	for _, gate := range skipped {
+		if _, err := tx.Exec(r.Context(), `
+			INSERT INTO issue_quality_gate_event (
+				workspace_id, project_id, issue_id, gate_key, gate_name,
+				from_status, to_status, actor_type, actor_id
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		`, issue.WorkspaceID, issue.ProjectID, issue.ID, gate.Key, gate.Name, gate.Transition.From, gate.Transition.To, actorType, actorUUID); err != nil {
+			slog.Warn("record issue quality gate override event failed", "issue_id", uuidToString(issue.ID), "gate_key", gate.Key, "error", err)
+			writeError(w, http.StatusInternalServerError, "audit log write failed; quality gate override rolled back")
+			return
+		}
+	}
+	if _, err := qtx.CreateActivity(r.Context(), db.CreateActivityParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     issue.ID,
+		ActorType:   pgtype.Text{String: actorType, Valid: true},
+		ActorID:     actorUUID,
+		Action:      "quality_gate_override",
+		Details:     details,
+	}); err != nil {
+		slog.Warn("record quality gate override activity failed", "issue_id", uuidToString(issue.ID), "error", err)
+		writeError(w, http.StatusInternalServerError, "audit log write failed; quality gate override rolled back")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to override quality gate")
+		return
+	}
+
+	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	resp := issueToResponse(issue, prefix)
+
+	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
+		"issue":          resp,
+		"status_changed": true,
+		"prev_status":    prevIssue.Status,
+	})
+
+	if issue.Status == "cancelled" {
+		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
+	}
+	h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
+	h.advanceWorkflowOnStatusChange(r.Context(), prevIssue, issue, actorType, actorID)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"issue": resp,
+		"override": map[string]any{
+			"reason":        req.Reason,
+			"skipped_gates": qualityGateResponses(skipped),
+		},
 	})
 }
 

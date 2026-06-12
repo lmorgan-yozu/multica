@@ -151,6 +151,21 @@ var issueFlowScanCmd = &cobra.Command{
 	RunE:  runIssueFlowScan,
 }
 
+var issueGatesCmd = &cobra.Command{
+	Use:     "gates <id>",
+	Aliases: []string{"quality-gates"},
+	Short:   "Inspect issue quality gate state",
+	Args:    exactArgs(1),
+	RunE:    runIssueGates,
+}
+
+var issueGateOverrideCmd = &cobra.Command{
+	Use:   "gate-override <id>",
+	Short: "Override a blocking quality gate with an audited reason",
+	Args:  exactArgs(1),
+	RunE:  runIssueGateOverride,
+}
+
 // Comment subcommands.
 
 var issueCommentCmd = &cobra.Command{
@@ -261,6 +276,8 @@ func init() {
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
 	issueCmd.AddCommand(issueFlowScanCmd)
+	issueCmd.AddCommand(issueGatesCmd)
+	issueCmd.AddCommand(issueGateOverrideCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
 	issueCmd.AddCommand(issueRunsCmd)
@@ -342,6 +359,16 @@ func init() {
 	issueFlowScanCmd.Flags().String("stale-window", "30m", "How long an in-progress issue may have no active task/update before it is stale")
 	issueFlowScanCmd.Flags().Int("limit", 200, "Maximum number of in-progress issues to scan")
 	issueFlowScanCmd.Flags().Bool("apply", false, "Record flow-scan findings and re-enqueue stale assigned work")
+
+	// issue quality gates
+	issueGatesCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// issue gate override
+	issueGateOverrideCmd.Flags().String("status", "", "Target status for the override (required)")
+	issueGateOverrideCmd.Flags().String("reason", "", "Override reason (required; decodes \\n, \\r, \\t, \\\\)")
+	issueGateOverrideCmd.Flags().Bool("reason-stdin", false, "Read override reason from stdin")
+	issueGateOverrideCmd.Flags().String("reason-file", "", "Read override reason from a UTF-8 file")
+	issueGateOverrideCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue assign
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
@@ -1502,6 +1529,118 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
+	}
+	return nil
+}
+
+func runIssueGates(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+issueRef.ID+"/quality-gates", &result); err != nil {
+		return fmt.Errorf("get quality gates: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	gates, _ := result["gates"].([]any)
+	rows := make([][]string, 0, len(gates))
+	for _, item := range gates {
+		gate, _ := item.(map[string]any)
+		transition := ""
+		if tr, ok := gate["transition"].(map[string]any); ok {
+			from := strVal(tr, "from")
+			to := strVal(tr, "to")
+			if from != "" || to != "" {
+				transition = from + " -> " + to
+			}
+		}
+		state := "pending"
+		if boolVal(gate, "complete") {
+			state = "complete"
+		} else if boolVal(gate, "blocked") {
+			state = "blocked"
+		}
+		rows = append(rows, []string{
+			strVal(gate, "key"),
+			strVal(gate, "name"),
+			transition,
+			state,
+			strVal(gate, "next_actor"),
+			strVal(gate, "reason"),
+		})
+	}
+	cli.PrintTable(os.Stdout, []string{"KEY", "NAME", "TRANSITION", "STATE", "NEXT", "REASON"}, rows)
+	return nil
+}
+
+func runIssueGateOverride(cmd *cobra.Command, args []string) error {
+	status, _ := cmd.Flags().GetString("status")
+	if strings.TrimSpace(status) == "" {
+		return fmt.Errorf("--status is required")
+	}
+	reason, ok, err := resolveTextFlag(cmd, "reason")
+	if err != nil {
+		return err
+	}
+	if !ok || strings.TrimSpace(reason) == "" {
+		return fmt.Errorf("--reason, --reason-stdin, or --reason-file is required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	body := map[string]any{
+		"status": strings.TrimSpace(status),
+		"reason": strings.TrimSpace(reason),
+	}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+issueRef.ID+"/quality-gates/override", body, &result); err != nil {
+		return fmt.Errorf("override quality gate: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	issue, _ := result["issue"].(map[string]any)
+	override, _ := result["override"].(map[string]any)
+	fmt.Fprintf(os.Stderr, "Issue %s force-transitioned to %s; skipped %d gate(s).\n", issueDisplayKey(issue), strVal(issue, "status"), len(anySlice(override["skipped_gates"])))
+	return nil
+}
+
+func boolVal(m map[string]any, key string) bool {
+	v, _ := m[key].(bool)
+	return v
+}
+
+func anySlice(v any) []any {
+	if s, ok := v.([]any); ok {
+		return s
 	}
 	return nil
 }

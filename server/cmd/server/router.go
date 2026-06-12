@@ -698,6 +698,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/dependencies", h.CreateIssueDependency)
 					r.Delete("/dependencies/{dependsOnId}", h.DeleteIssueDependency)
 					r.Get("/quality-gates", h.GetIssueQualityGates)
+					r.Post("/quality-gates/override", h.OverrideIssueQualityGate)
 				})
 			})
 

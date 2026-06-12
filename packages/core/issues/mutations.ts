@@ -290,6 +290,10 @@ export function useUpdateIssue() {
         vars.status !== undefined ||
         Object.prototype.hasOwnProperty.call(vars, "project_id")
       ) {
+        if (vars.status !== undefined) {
+          qc.invalidateQueries({ queryKey: issueKeys.qualityGates(vars.id) });
+          qc.invalidateQueries({ queryKey: issueKeys.timeline(vars.id) });
+        }
         qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       }
       // Refresh the issue's attachments cache when the description editor
@@ -323,6 +327,33 @@ export function useUpdateIssue() {
       if (ctx?.parentId || newParentId) {
         qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
       }
+    },
+  });
+}
+
+export function useOverrideIssueQualityGate() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({
+      id,
+      status,
+      reason,
+    }: {
+      id: string;
+      status: string;
+      reason: string;
+    }) => api.overrideIssueQualityGate(id, { status, reason }),
+    onSuccess: ({ issue }, vars) => {
+      qc.setQueryData<Issue>(issueKeys.detail(wsId, vars.id), issue);
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars.id) });
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.qualityGates(vars.id) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(vars.id) });
+      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     },
   });
 }

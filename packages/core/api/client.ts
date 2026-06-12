@@ -1,5 +1,6 @@
 import type {
   Issue,
+  IssueQualityGatesResponse,
   CreateIssueRequest,
   UpdateIssueRequest,
   GroupedIssuesResponse,
@@ -133,6 +134,7 @@ import type {
   CreateBillingCheckoutSessionResponse,
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
+  QualityGateOverrideResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -598,6 +600,17 @@ export class ApiClient {
   async updateIssue(id: string, data: UpdateIssueRequest): Promise<Issue> {
     return this.fetch(`/api/issues/${id}`, {
       method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getIssueQualityGates(id: string): Promise<IssueQualityGatesResponse> {
+    return this.fetch(`/api/issues/${id}/quality-gates`);
+  }
+
+  async overrideIssueQualityGate(id: string, data: { status: string; reason: string }): Promise<QualityGateOverrideResponse> {
+    return this.fetch(`/api/issues/${id}/quality-gates/override`, {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }

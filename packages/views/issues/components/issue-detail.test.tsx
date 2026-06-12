@@ -10,6 +10,7 @@ import enIssues from "../../locales/en/issues.json";
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
+const mockWorkspaceMembers = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => mockViewport.isMobile,
@@ -60,7 +61,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "members"],
-    queryFn: () => Promise.resolve([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
+    queryFn: () => mockWorkspaceMembers(),
   }),
   agentListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "agents"],
@@ -195,6 +196,8 @@ vi.mock("../../projects/components/project-picker", () => ({
 // Mock api
 const mockApiObj = vi.hoisted(() => ({
   getIssue: vi.fn(),
+  getIssueQualityGates: vi.fn(),
+  overrideIssueQualityGate: vi.fn(),
   listTimeline: vi.fn().mockResolvedValue([]),
   listComments: vi.fn().mockResolvedValue([]),
   createComment: vi.fn(),
@@ -365,8 +368,14 @@ vi.mock("@multica/core/realtime", () => ({
 }));
 
 // Mock sonner
+const mockToast = vi.hoisted(() => ({
+  error: vi.fn(),
+  success: vi.fn(),
+  message: vi.fn(),
+}));
+
 vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
+  toast: mockToast,
 }));
 
 // Mock react-resizable-panels (used by @multica/ui/components/ui/resizable)
@@ -449,12 +458,12 @@ function createTestQueryClient() {
   });
 }
 
-function renderIssueDetail(issueId = "issue-1") {
+function renderIssueDetail(issueId = "issue-1", props: Partial<React.ComponentProps<typeof IssueDetail>> = {}) {
   const queryClient = createTestQueryClient();
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
-        <IssueDetail issueId={issueId} />
+        <IssueDetail issueId={issueId} {...props} />
       </QueryClientProvider>
     </I18nProvider>,
   );
@@ -492,8 +501,16 @@ describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockViewport.isMobile = false;
+    mockWorkspaceMembers.mockResolvedValue([
+      { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
+    ]);
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
+    mockApiObj.getIssueQualityGates.mockResolvedValue({ enabled: false, gates: [] });
+    mockApiObj.overrideIssueQualityGate.mockResolvedValue({
+      issue: { ...mockIssue, status: "done" },
+      override: { reason: "Emergency unblock", skipped_gates: [] },
+    });
     // /timeline returns the entries flat in chronological order (oldest first).
     mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
     mockApiObj.listIssueReactions.mockResolvedValue([]);
@@ -529,6 +546,209 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+  });
+
+  it("renders pending and completed quality gates in the sidebar", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      status: "in_review",
+      project_id: "project-1",
+    });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "project-1",
+      workspace_id: "ws-1",
+      name: "Ada project",
+      description: null,
+      status: "in_progress",
+      priority: "high",
+      lead_member_id: null,
+      start_date: null,
+      target_date: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    mockApiObj.getIssueQualityGates.mockResolvedValue({
+      enabled: true,
+      project_id: "project-1",
+      issue_id: "issue-1",
+      gates: [
+        {
+          key: "code_review",
+          name: "Code review",
+          order: 1,
+          required_actor_type: "agent",
+          required_role: "Code Reviewer",
+          independent: true,
+          transition: { from: "in_review", to: "done" },
+          complete: false,
+          blocked: true,
+          reason: "Code Reviewer must pass before moving from in_review to done",
+          next_actor: "Code Reviewer",
+        },
+        {
+          key: "qa",
+          name: "QA acceptance",
+          order: 2,
+          required_actor_type: "agent",
+          required_role: "QA Engineer",
+          independent: true,
+          transition: { from: "in_review", to: "done" },
+          complete: true,
+          blocked: false,
+          next_actor: "QA Engineer",
+          event: {
+            actor_type: "agent",
+            actor_id: "agent-1",
+            created_at: "2026-01-19T00:00:00Z",
+          },
+        },
+      ],
+    });
+
+    renderIssueDetail();
+
+    expect(await screen.findByText("Code review")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Quality gates/ })).toBeInTheDocument();
+    expect(screen.getByText("Transition blocked")).toBeInTheDocument();
+    expect(screen.getByText("QA acceptance")).toBeInTheDocument();
+    expect(screen.getAllByText("Complete").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Claude Agent/).length).toBeGreaterThan(0);
+  });
+
+  it("hides the quality gate override action from non-owner members", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      status: "in_review",
+      project_id: "project-1",
+    });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "project-1",
+      workspace_id: "ws-1",
+      name: "Ada project",
+      description: null,
+      status: "in_progress",
+      priority: "high",
+      lead_member_id: null,
+      start_date: null,
+      target_date: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    mockWorkspaceMembers.mockResolvedValue([
+      { user_id: "user-1", name: "Test User", email: "test@test.com", role: "member" },
+    ]);
+    mockApiObj.getIssueQualityGates.mockResolvedValue({
+      enabled: true,
+      gates: [
+        {
+          key: "code_review",
+          name: "Code review",
+          order: 1,
+          required_actor_type: "agent",
+          required_role: "Code Reviewer",
+          independent: true,
+          transition: { from: "in_review", to: "done" },
+          complete: false,
+          blocked: true,
+          reason: "Code Reviewer must pass before moving from in_review to done",
+          next_actor: "Code Reviewer",
+        },
+      ],
+    });
+
+    renderIssueDetail();
+
+    await screen.findByText("Code review");
+    expect(screen.queryByText("Override gate")).not.toBeInTheDocument();
+  });
+
+  it("shows the quality gate override action to workspace owners and admins", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      status: "in_review",
+      project_id: "project-1",
+    });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "project-1",
+      workspace_id: "ws-1",
+      name: "Ada project",
+      description: null,
+      status: "in_progress",
+      priority: "high",
+      lead_member_id: null,
+      start_date: null,
+      target_date: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    mockApiObj.getIssueQualityGates.mockResolvedValue({
+      enabled: true,
+      gates: [
+        {
+          key: "code_review",
+          name: "Code review",
+          order: 1,
+          required_actor_type: "agent",
+          required_role: "Code Reviewer",
+          independent: true,
+          transition: { from: "in_review", to: "done" },
+          complete: false,
+          blocked: true,
+          reason: "Code Reviewer must pass before moving from in_review to done",
+          next_actor: "Code Reviewer",
+        },
+      ],
+    });
+
+    renderIssueDetail();
+
+    expect(await screen.findByText("Override gate")).toBeInTheDocument();
+  });
+
+  it("renders audited quality gate override events in the activity timeline", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "activity-1",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "quality_gate_override",
+        details: {
+          reason: "Release train is blocked",
+          from_status: "in_review",
+          to_status: "done",
+          skipped_gates: [
+            {
+              key: "code_review",
+              name: "Code review",
+              transition: { from: "in_review", to: "done" },
+              next_actor: "Code Reviewer",
+            },
+          ],
+        },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    expect(await screen.findByText(/overrode quality gate: Release train is blocked/)).toBeInTheDocument();
+  });
+
+  it("shows backend blocked-transition errors when a status update is rejected", async () => {
+    mockApiObj.updateIssue.mockRejectedValue(
+      new Error("missing quality gate \"Code review\": Code Reviewer must pass before moving to done"),
+    );
+
+    renderIssueDetail("issue-1", { onDone: vi.fn() });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Mark as done" }));
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith(
+        "missing quality gate \"Code review\": Code Reviewer must pass before moving to done",
+      );
+    });
   });
 
   it("renders the issue title leaf as a link to the issue detail page", async () => {

@@ -432,6 +432,7 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (wsId) {
         onIssueUpdated(qc, wsId, issue);
+        qc.invalidateQueries({ queryKey: issueKeys.qualityGates(issue.id) });
         if (issue.status) {
           onInboxIssueStatusChanged(qc, wsId, issue.id, issue.status);
         }
@@ -577,7 +578,10 @@ export function useRealtimeSync(
 
     const unsubActivityCreated = ws.on("activity:created", (p) => {
       const { issue_id } = p as ActivityCreatedPayload;
-      if (issue_id) invalidateTimeline(issue_id);
+      if (issue_id) {
+        invalidateTimeline(issue_id);
+        qc.invalidateQueries({ queryKey: issueKeys.qualityGates(issue_id) });
+      }
     });
 
     const unsubReactionAdded = ws.on("reaction:added", (p) => {

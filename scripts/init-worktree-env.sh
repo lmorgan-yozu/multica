@@ -9,26 +9,33 @@ if [ -f "$ENV_FILE" ] && [ "${FORCE:-0}" != "1" ]; then
 fi
 
 worktree_name="${WORKTREE_NAME:-$(basename "$PWD")}"
-slug="$(printf '%s' "$worktree_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//')"
-if [ -z "$slug" ]; then
-  slug="multica"
+db_slug="$(printf '%s' "$worktree_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//')"
+project_slug="$(printf '%s' "$worktree_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//')"
+if [ -z "$db_slug" ]; then
+  db_slug="multica"
+fi
+if [ -z "$project_slug" ]; then
+  project_slug="multica"
 fi
 
 hash_value="$(printf '%s' "$PWD" | cksum | awk '{print $1}')"
 offset=$((hash_value % 1000))
 
-postgres_db="multica_${slug}_${offset}"
-postgres_port=5432
+postgres_db="multica_${db_slug}_${offset}"
+postgres_port=$((55000 + offset))
+compose_project="multica-dev-${project_slug}-${offset}"
 backend_port=$((18080 + offset))
 frontend_port=$((13000 + offset))
 frontend_origin="http://localhost:${frontend_port}"
 
 cat > "$ENV_FILE" <<EOF
+MULTICA_DEV_PROJECT=${compose_project}
+MULTICA_DEV_PG_PORT=${postgres_port}
 POSTGRES_DB=${postgres_db}
 POSTGRES_USER=multica
 POSTGRES_PASSWORD=multica
 POSTGRES_PORT=${postgres_port}
-DATABASE_URL=postgres://multica:multica@localhost:${postgres_port}/${postgres_db}?sslmode=disable
+DATABASE_URL=postgres://multica:multica@127.0.0.1:${postgres_port}/${postgres_db}?sslmode=disable
 
 PORT=${backend_port}
 JWT_SECRET=change-me-in-production
@@ -47,7 +54,8 @@ NEXT_PUBLIC_WS_URL=ws://localhost:${backend_port}/ws
 EOF
 
 echo "Generated $ENV_FILE for worktree '$worktree_name'"
-echo "  Shared Postgres: localhost:${postgres_port}"
+echo "  Compose project: ${compose_project}"
+echo "  Shared Postgres: 127.0.0.1:${postgres_port}"
 echo "  Database: ${postgres_db}"
 echo "  Backend:  http://localhost:${backend_port}"
 echo "  Frontend: ${frontend_origin}"

@@ -35,6 +35,9 @@ jobs:
       - name: Test check script safety
         run: bash scripts/check.test.sh
 
+      - name: Test dev postgres safety
+        run: bash scripts/dev-postgres.test.sh
+
       - name: Verify reserved-slugs.ts is up to date
         # Re-runs the generator and fails on any drift from the
         # checked-in TypeScript output. The Go side embeds the JSON

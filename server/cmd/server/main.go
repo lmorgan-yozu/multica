@@ -349,6 +349,7 @@ func main() {
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
+	go runTaskUsageHourlyRollup(sweepCtx, pool, taskUsageHourlyRollupInterval)
 
 	// Lark inbound supervisor: holds the §4.4 WS lease per installation
 	// and runs the EventConnector for each. Nil when the Lark master

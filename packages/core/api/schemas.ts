@@ -209,6 +209,7 @@ export const IssueSchema = z.object({
   creator_id: z.string(),
   parent_issue_id: z.string().nullable(),
   project_id: z.string().nullable(),
+  milestone_id: z.string().nullable().optional(),
   position: z.number(),
   start_date: z.string().nullable(),
   due_date: z.string().nullable(),

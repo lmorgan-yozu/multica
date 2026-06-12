@@ -253,6 +253,66 @@ describe("ApiClient", () => {
     );
   });
 
+  describe("quality gate endpoints", () => {
+    const jsonResponse = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    it("falls back when the quality-gate state response drifts", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          jsonResponse({
+            enabled: true,
+            gates: [{ key: "review", order: "first" }],
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.getIssueQualityGates("issue-1")).resolves.toEqual({
+        enabled: false,
+        gates: [],
+      });
+    });
+
+    it("falls back when the quality-gate override response drifts", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        jsonResponse({
+          issue: { id: "issue-1" },
+          override: { reason: "Owner decision", skipped_gates: "review" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.overrideIssueQualityGate("issue-1", {
+          status: "done",
+          reason: "Owner decision",
+        }),
+      ).resolves.toMatchObject({
+        issue: { id: "", status: "todo" },
+        override: { reason: "", skipped_gates: [] },
+      });
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.example.test/api/issues/issue-1/quality-gates/override",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            status: "done",
+            reason: "Owner decision",
+          }),
+        }),
+      );
+    });
+  });
+
   describe("getAttachment", () => {
     it("returns the parsed attachment for a well-formed response", async () => {
       vi.stubGlobal(

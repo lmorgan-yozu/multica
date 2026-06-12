@@ -19,12 +19,15 @@ import {
   Pin,
   PinOff,
   Plus,
+  ShieldAlert,
+  ShieldCheck,
   Tag,
   Users,
 } from "lucide-react";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -42,10 +45,10 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
-import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import type { Attachment, Issue, IssueStatus, IssuePriority, IssueQualityGatesResponse, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly } from "@multica/core/issues/date";
-import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { useOverrideIssueQualityGate, useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
@@ -65,7 +68,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions, issueQualityGatesOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -189,6 +192,264 @@ function priorityLabel(priority: string, t: ActivityT): string {
   return priority;
 }
 
+function gateTransitionLabel(
+  transition: { from: string; to: string },
+  t: ActivityT,
+): string {
+  return `${statusLabel(transition.from, t)} -> ${statusLabel(transition.to, t)}`;
+}
+
+function QualityGateSection({
+  issueId,
+  issueStatus,
+  gateState,
+  isLoading,
+  isError,
+  canOverride,
+  getActorName,
+  t,
+}: {
+  issueId: string;
+  issueStatus: IssueStatus;
+  gateState: IssueQualityGatesResponse | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  canOverride: boolean;
+  getActorName: (type: string, id: string) => string;
+  t: ActivityT;
+}) {
+  const [open, setOpen] = useState(true);
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const overrideGate = useOverrideIssueQualityGate();
+
+  if (isLoading) {
+    return (
+      <div>
+        <div className="mb-2 flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium">
+          {t(($) => $.detail.section_quality_gates)}
+        </div>
+        <div className="space-y-2 pl-2">
+          <Skeleton className="h-4 w-36" />
+          <Skeleton className="h-4 w-44" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!gateState?.enabled && !isError) return null;
+
+  const gates = gateState?.gates ?? [];
+  const completed = gates.filter((gate) => gate.complete).length;
+  const blockedGate = gates.find((gate) => gate.blocked);
+  const pendingGate = blockedGate ?? gates.find((gate) => !gate.complete);
+  const overrideDisabled =
+    !pendingGate || !reason.trim() || overrideGate.isPending;
+
+  const submitOverride = () => {
+    if (!pendingGate || !reason.trim()) return;
+    overrideGate.mutate(
+      { id: issueId, status: pendingGate.transition.to, reason: reason.trim() },
+      {
+        onSuccess: () => {
+          setReason("");
+          setOverrideOpen(false);
+          toast.success(t(($) => $.detail.quality_gate_override_success));
+        },
+        onError: (err) => {
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.detail.quality_gate_override_failed),
+          );
+        },
+      },
+    );
+  };
+
+  return (
+    <div>
+      <button
+        type="button"
+        className={`mb-2 flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors hover:bg-accent/70 ${
+          open ? "" : "text-muted-foreground hover:text-foreground"
+        }`}
+        onClick={() => setOpen(!open)}
+      >
+        {t(($) => $.detail.section_quality_gates)}
+        <span className="ml-auto tabular-nums text-muted-foreground">
+          {completed}/{gates.length}
+        </span>
+        <ChevronRight
+          className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${
+            open ? "rotate-90" : ""
+          }`}
+        />
+      </button>
+      {open && (
+        <div className="space-y-2 pl-2 text-xs">
+          {isError ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-2 py-2 text-destructive">
+              {t(($) => $.detail.quality_gates_error)}
+            </div>
+          ) : gates.length === 0 ? (
+            <div className="rounded-md border px-2 py-2 text-muted-foreground">
+              {t(($) => $.detail.quality_gates_empty)}
+            </div>
+          ) : (
+            <>
+              {pendingGate && (
+                <div
+                  className={cn(
+                    "rounded-md border px-2 py-2",
+                    blockedGate
+                      ? "border-destructive/30 bg-destructive/5 text-destructive"
+                      : "bg-muted/40 text-muted-foreground",
+                  )}
+                >
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">
+                      {blockedGate
+                        ? t(($) => $.detail.quality_gate_blocked)
+                        : t(($) => $.detail.quality_gate_pending)}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-muted-foreground">
+                    {pendingGate.reason ||
+                      t(($) => $.detail.quality_gate_pending_actor, {
+                        actor: pendingGate.next_actor ?? pendingGate.name,
+                      })}
+                  </div>
+                  {pendingGate.transition.from === issueStatus && (
+                    <div className="mt-1 text-muted-foreground">
+                      {gateTransitionLabel(pendingGate.transition, t)}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="space-y-1.5">
+                {gates.map((gate) => {
+                  const event = gate.event;
+                  const actor =
+                    event?.actor_id && event.actor_type
+                      ? getActorName(event.actor_type, event.actor_id)
+                      : null;
+                  return (
+                    <div key={gate.key} className="rounded-md border px-2 py-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        {gate.complete ? (
+                          <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-success" />
+                        ) : (
+                          <ShieldAlert
+                            className={cn(
+                              "h-3.5 w-3.5 shrink-0",
+                              gate.blocked ? "text-destructive" : "text-muted-foreground",
+                            )}
+                          />
+                        )}
+                        <span className="min-w-0 flex-1 truncate font-medium">
+                          {gate.name}
+                        </span>
+                        <span
+                          className={cn(
+                            "shrink-0 rounded px-1.5 py-0.5 text-[11px]",
+                            gate.complete
+                              ? "bg-success/10 text-success"
+                              : gate.blocked
+                                ? "bg-destructive/10 text-destructive"
+                                : "bg-muted text-muted-foreground",
+                          )}
+                        >
+                          {gate.complete
+                            ? t(($) => $.detail.quality_gate_complete)
+                            : gate.blocked
+                              ? t(($) => $.detail.quality_gate_blocked_short)
+                              : t(($) => $.detail.quality_gate_pending_short)}
+                        </span>
+                      </div>
+                      <div className="mt-1 space-y-0.5 pl-5 text-muted-foreground">
+                        <div>{gateTransitionLabel(gate.transition, t)}</div>
+                        <div>
+                          {t(($) => $.detail.quality_gate_required_actor, {
+                            actor: gate.next_actor ?? gate.required_role ?? gate.required_actor_type ?? gate.name,
+                          })}
+                        </div>
+                        {event?.created_at && (
+                          <div>
+                            {t(($) => $.detail.quality_gate_approved_by, {
+                              actor: actor ?? t(($) => $.detail.quality_gate_unknown_actor),
+                              date: shortDate(event.created_at),
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {canOverride && blockedGate && (
+                <div className="pt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setOverrideOpen(true)}
+                  >
+                    {t(($) => $.detail.quality_gate_override_action)}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+      <Dialog open={overrideOpen} onOpenChange={setOverrideOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.detail.quality_gate_override_title)}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {pendingGate
+                ? t(($) => $.detail.quality_gate_override_body, {
+                    gate: pendingGate.name,
+                    status: statusLabel(pendingGate.transition.to, t),
+                  })
+                : t(($) => $.detail.quality_gate_override_failed)}
+            </p>
+            <Textarea
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder={t(($) => $.detail.quality_gate_override_reason_placeholder)}
+              className="min-h-24 resize-none"
+            />
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setOverrideOpen(false)}
+              >
+                {t(($) => $.detail.quality_gate_override_cancel)}
+              </Button>
+              <Button
+                type="button"
+                onClick={submitOverride}
+                disabled={overrideDisabled}
+              >
+                {overrideGate.isPending
+                  ? t(($) => $.detail.quality_gate_override_submitting)
+                  : t(($) => $.detail.quality_gate_override_confirm)}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function formatActivity(
   entry: TimelineEntry,
   t: ActivityT,
@@ -235,6 +496,10 @@ function formatActivity(
       });
     case "description_updated":
       return t(($) => $.activity.description_updated);
+    case "quality_gate_override":
+      return t(($) => $.activity.quality_gate_override, {
+        reason: details.reason ?? "?",
+      });
     case "task_completed":
       return t(($) => $.activity.task_completed, { count: entry.coalesced_count ?? 1 });
     case "task_failed":
@@ -803,6 +1068,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       const cached = allIssues.find((i) => i.id === id);
       return cached?.description != null ? cached : undefined;
     },
+  });
+  const {
+    data: qualityGates,
+    isLoading: qualityGatesLoading,
+    isError: qualityGatesError,
+  } = useQuery({
+    ...issueQualityGatesOptions(id),
+    enabled: !!issue,
   });
 
   // Record recent visit
@@ -1410,6 +1683,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </div>}
       </div>
 
+      <QualityGateSection
+        issueId={issue.id}
+        issueStatus={issue.status}
+        gateState={qualityGates}
+        isLoading={qualityGatesLoading}
+        isError={qualityGatesError}
+        canOverride={currentUserRole === "owner" || currentUserRole === "admin"}
+        getActorName={getActorName}
+        t={t}
+      />
+
       {/* Parent issue — standalone section, only when the issue has a
           parent. Setting a parent is reachable via the issue actions menu;
           this card surfaces an existing parent without occupying sidebar
@@ -1657,6 +1941,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       variant="ghost"
                       size="icon-sm"
                       className="text-muted-foreground"
+                      aria-label={t(($) => $.detail.mark_done_tooltip)}
                       onClick={() => { handleUpdateField({ status: "done" }); onDone?.(); }}
                     >
                       <CircleCheck />

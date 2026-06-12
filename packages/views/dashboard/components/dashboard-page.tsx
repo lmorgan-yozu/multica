@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, FolderKanban } from "lucide-react";
+import { AlertCircle, BarChart3, FolderKanban } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
@@ -51,6 +51,7 @@ import {
   aggregateDailyTokens,
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
+  collectUnpricedDashboardModels,
   computeDailyTotals,
   formatDuration,
   mergeAgentDashboardRows,
@@ -250,6 +251,10 @@ export function DashboardPage() {
     () => computeDailyTotals(dailyUsageInWindow),
     [dailyUsageInWindow],
   );
+  const unpricedModels = useMemo(
+    () => collectUnpricedDashboardModels(dailyUsageInWindow),
+    [dailyUsageInWindow],
+  );
   const dailyCost = useMemo(
     () => aggregateDailyCost(dailyUsageInWindow),
     [dailyUsageInWindow],
@@ -353,6 +358,8 @@ export function DashboardPage() {
             <DashboardEmpty />
           ) : (
             <>
+              <UnpricedModelsNotice models={unpricedModels} />
+
               {/* KPI row — same 3-divide-x card grid the runtime usage
                   section uses, expanded to four tiles. */}
               <div className="grid grid-cols-1 divide-y rounded-lg border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
@@ -418,6 +425,28 @@ export function DashboardPage() {
             </>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function UnpricedModelsNotice({ models }: { models: string[] }) {
+  const { t } = useT("usage");
+  if (models.length === 0) return null;
+
+  return (
+    <div
+      role="alert"
+      className="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs"
+    >
+      <AlertCircle className="h-4 w-4 shrink-0 text-warning" />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <p className="text-foreground">
+          {t(($) => $.pricing.unpriced_notice, { count: models.length })}
+        </p>
+        <p className="truncate font-mono text-[11px] text-muted-foreground">
+          {models.join(", ")}
+        </p>
       </div>
     </div>
   );

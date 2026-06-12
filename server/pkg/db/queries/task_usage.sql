@@ -20,14 +20,61 @@ ORDER BY model;
 
 -- name: GetIssueUsageSummary :one
 SELECT
-    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
-    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
-    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(tu.input_tokens), 0)::bigint       AS total_input_tokens,
+    COALESCE(SUM(tu.output_tokens), 0)::bigint      AS total_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint  AS total_cache_read_tokens,
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
-    COUNT(DISTINCT tu.task_id)::int AS task_count
-FROM task_usage tu
-JOIN agent_task_queue atq ON atq.id = tu.task_id
-WHERE atq.issue_id = $1;
+    COUNT(DISTINCT atq.id)::int                     AS task_count,
+    COUNT(DISTINCT tu.task_id)::int                 AS usage_task_count,
+    (COUNT(DISTINCT atq.id) - COUNT(DISTINCT tu.task_id))::int AS missing_usage_task_count
+FROM agent_task_queue atq
+LEFT JOIN task_usage tu ON tu.task_id = atq.id
+WHERE atq.issue_id = $1
+  AND (sqlc.narg('agent_id')::uuid IS NULL OR atq.agent_id = sqlc.narg('agent_id'))
+  AND (sqlc.narg('since')::timestamptz IS NULL OR COALESCE(tu.created_at, atq.completed_at, atq.created_at) >= sqlc.narg('since'))
+  AND (sqlc.narg('until')::timestamptz IS NULL OR COALESCE(tu.created_at, atq.completed_at, atq.created_at) < sqlc.narg('until'));
+
+-- name: ListIssueUsageByTask :many
+SELECT
+    atq.id AS task_id,
+    atq.session_id,
+    atq.agent_id,
+    atq.status,
+    tu.provider,
+    tu.model,
+    COALESCE(tu.input_tokens, 0)::bigint       AS input_tokens,
+    COALESCE(tu.output_tokens, 0)::bigint      AS output_tokens,
+    COALESCE(tu.cache_read_tokens, 0)::bigint  AS cache_read_tokens,
+    COALESCE(tu.cache_write_tokens, 0)::bigint AS cache_write_tokens,
+    CASE WHEN tu.task_id IS NULL THEN 'missing' ELSE 'complete' END::text AS usage_status
+FROM agent_task_queue atq
+LEFT JOIN task_usage tu ON tu.task_id = atq.id
+WHERE atq.issue_id = $1
+  AND (sqlc.narg('agent_id')::uuid IS NULL OR atq.agent_id = sqlc.narg('agent_id'))
+  AND (sqlc.narg('since')::timestamptz IS NULL OR COALESCE(tu.created_at, atq.completed_at, atq.created_at) >= sqlc.narg('since'))
+  AND (sqlc.narg('until')::timestamptz IS NULL OR COALESCE(tu.created_at, atq.completed_at, atq.created_at) < sqlc.narg('until'))
+ORDER BY atq.created_at DESC, tu.provider, tu.model;
+
+-- name: ListIssueUsageByAgent :many
+SELECT
+    atq.agent_id,
+    tu.provider,
+    tu.model,
+    COALESCE(SUM(tu.input_tokens), 0)::bigint       AS input_tokens,
+    COALESCE(SUM(tu.output_tokens), 0)::bigint      AS output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint  AS cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS cache_write_tokens,
+    COUNT(DISTINCT atq.id)::int                     AS task_count,
+    COUNT(DISTINCT tu.task_id)::int                 AS usage_task_count,
+    (COUNT(DISTINCT atq.id) - COUNT(DISTINCT tu.task_id))::int AS missing_usage_task_count
+FROM agent_task_queue atq
+LEFT JOIN task_usage tu ON tu.task_id = atq.id
+WHERE atq.issue_id = $1
+  AND (sqlc.narg('agent_id')::uuid IS NULL OR atq.agent_id = sqlc.narg('agent_id'))
+  AND (sqlc.narg('since')::timestamptz IS NULL OR COALESCE(tu.created_at, atq.completed_at, atq.created_at) >= sqlc.narg('since'))
+  AND (sqlc.narg('until')::timestamptz IS NULL OR COALESCE(tu.created_at, atq.completed_at, atq.created_at) < sqlc.narg('until'))
+GROUP BY atq.agent_id, tu.provider, tu.model
+ORDER BY atq.agent_id, tu.provider, tu.model;
 
 -- name: ListDashboardUsageDaily :many
 -- Daily per-(date, model) token aggregates for the workspace, served
@@ -84,6 +131,7 @@ FROM task_usage_hourly
 WHERE workspace_id = $1
   AND bucket_hour >= @since::timestamptz
   AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('agent_id')::uuid IS NULL OR agent_id = sqlc.narg('agent_id'))
 GROUP BY agent_id, model
 ORDER BY agent_id, model;
 

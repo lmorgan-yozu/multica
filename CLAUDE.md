@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+For host-specific rules when working on Multica from inside Multica, read the dated post-mortem rules copied into `AGENTS.md` before running any Docker or Compose command.
+
 ## Conventions reference
 
 The single source of truth for **code naming, the i18n translation glossary, and the Chinese voice guide** is the docs site:

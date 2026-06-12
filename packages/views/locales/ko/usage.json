@@ -38,6 +38,10 @@
     "title_tasks": "주별 작업",
     "partial_label": "{{range}} (부분 · 7일 중 {{covered}}일)"
   },
+  "pricing": {
+    "unpriced_notice_one": "{{count}}개 모델에 관리되는 가격이 없어 해당 토큰은 비용 합계에서 제외됩니다.",
+    "unpriced_notice_other": "{{count}}개 모델에 관리되는 가격이 없어 해당 토큰은 비용 합계에서 제외됩니다."
+  },
   "leaderboard": {
     "title": "리더보드",
     "caption": "에이전트 {{count}}개",

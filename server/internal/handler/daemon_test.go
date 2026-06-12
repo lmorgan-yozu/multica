@@ -1115,6 +1115,152 @@ func TestGetIssueUsage_CrossWorkspace_Returns404(t *testing.T) {
 	}
 }
 
+func TestGetIssueUsage_ReturnsBreakdownsAndMissingUsage(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var missingAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'Issue usage missing agent', '', 'cloud', '{}'::jsonb, $2, 'private', 1, $3)
+		RETURNING id
+	`, testWorkspaceID, runtimeID, testUserID).Scan(&missingAgentID); err != nil {
+		t.Fatalf("setup: create missing agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, missingAgentID) })
+
+	var issueID, otherIssueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'issue-usage-breakdown', 'in_progress', 'medium', $2, 'member',
+			(SELECT COALESCE(MAX(number), 92000) + 1 FROM issue WHERE workspace_id = $1), 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'issue-usage-other', 'in_progress', 'medium', $2, 'member',
+			(SELECT COALESCE(MAX(number), 92000) + 1 FROM issue WHERE workspace_id = $1), 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&otherIssueID); err != nil {
+		t.Fatalf("setup: create other issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, otherIssueID) })
+
+	now := time.Now().UTC()
+	oldUsageAt := now.Add(-48 * time.Hour)
+	newUsageAt := now.Add(-30 * time.Minute)
+	cutoff := now.Add(-24 * time.Hour)
+
+	insertTask := func(issue, agent, session string, createdAt time.Time) string {
+		t.Helper()
+		var taskID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (
+				agent_id, runtime_id, issue_id, status, session_id,
+				started_at, completed_at, created_at
+			)
+			VALUES ($1, $2, $3, 'completed', $4, $5::timestamptz, $5::timestamptz + interval '1 minute', $5::timestamptz)
+			RETURNING id
+		`, agent, runtimeID, issue, session, createdAt).Scan(&taskID); err != nil {
+			t.Fatalf("setup: create task: %v", err)
+		}
+		return taskID
+	}
+	insertUsage := func(taskID string, inputTokens, outputTokens int64, createdAt time.Time) {
+		t.Helper()
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO task_usage (
+				task_id, provider, model, input_tokens, output_tokens,
+				cache_read_tokens, cache_write_tokens, created_at
+			)
+			VALUES ($1, 'codex', 'gpt-test', $2, $3, 4, 5, $4)
+		`, taskID, inputTokens, outputTokens, createdAt); err != nil {
+			t.Fatalf("setup: create usage: %v", err)
+		}
+	}
+
+	oldTaskID := insertTask(issueID, agentID, "sess-old", oldUsageAt)
+	insertUsage(oldTaskID, 10, 20, oldUsageAt)
+	newTaskID := insertTask(issueID, agentID, "sess-new", newUsageAt)
+	insertUsage(newTaskID, 100, 200, newUsageAt)
+	insertTask(issueID, missingAgentID, "sess-missing", newUsageAt)
+	otherTaskID := insertTask(otherIssueID, agentID, "sess-other", newUsageAt)
+	insertUsage(otherTaskID, 1000, 2000, newUsageAt)
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/"+issueID+"/usage", nil)
+	req = withURLParam(req, "id", issueID)
+
+	testHandler.GetIssueUsage(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetIssueUsage: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp IssueUsageResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.TotalInputTokens != 110 || resp.TotalOutputTokens != 220 {
+		t.Fatalf("totals = input %d output %d, want 110/220", resp.TotalInputTokens, resp.TotalOutputTokens)
+	}
+	if resp.TaskCount != 3 || resp.UsageTaskCount != 2 || resp.MissingUsageTaskCount != 1 || resp.UsageStatus != "partial" {
+		t.Fatalf("counts/status = task %d usage %d missing %d status %q, want 3/2/1 partial",
+			resp.TaskCount, resp.UsageTaskCount, resp.MissingUsageTaskCount, resp.UsageStatus)
+	}
+	if len(resp.TaskBreakdown) != 3 {
+		t.Fatalf("task breakdown len = %d, want 3", len(resp.TaskBreakdown))
+	}
+	foundMissing := false
+	for _, row := range resp.TaskBreakdown {
+		if row.UsageStatus == "missing" {
+			foundMissing = true
+			if row.InputTokens != 0 || row.OutputTokens != 0 {
+				t.Fatalf("missing row tokens = %d/%d, want zero", row.InputTokens, row.OutputTokens)
+			}
+		}
+	}
+	if !foundMissing {
+		t.Fatalf("expected explicit missing usage task row")
+	}
+
+	filteredURL := fmt.Sprintf("/api/issues/%s/usage?agent_id=%s&since=%s",
+		issueID, agentID, cutoff.Format(time.RFC3339))
+	w = httptest.NewRecorder()
+	req = newRequest("GET", filteredURL, nil)
+	req = withURLParam(req, "id", issueID)
+
+	testHandler.GetIssueUsage(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetIssueUsage filtered: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode filtered response: %v", err)
+	}
+	if resp.TotalInputTokens != 100 || resp.TotalOutputTokens != 200 {
+		t.Fatalf("filtered totals = input %d output %d, want 100/200", resp.TotalInputTokens, resp.TotalOutputTokens)
+	}
+	if resp.TaskCount != 1 || resp.UsageTaskCount != 1 || resp.MissingUsageTaskCount != 0 || resp.UsageStatus != "complete" {
+		t.Fatalf("filtered counts/status = task %d usage %d missing %d status %q, want 1/1/0 complete",
+			resp.TaskCount, resp.UsageTaskCount, resp.MissingUsageTaskCount, resp.UsageStatus)
+	}
+}
+
 func TestGetDaemonWorkspaceRepos_WithDaemonToken(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

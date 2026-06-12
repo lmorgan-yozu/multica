@@ -23,14 +23,114 @@ set +a
 
 BACKEND_PID=""
 FRONTEND_PID=""
+CHECK_DB_CONTAINER=""
 STARTED_BACKEND=false
 STARTED_FRONTEND=false
 EXIT_CODE=0
+
+db_host=""
+
+parse_database_url_host() {
+  local rest authority hostport
+
+  rest="${DATABASE_URL#*://}"
+  rest="${rest%%\?*}"
+  authority="${rest%%/*}"
+  hostport="${authority##*@}"
+
+  if [[ "$hostport" == \[* ]]; then
+    db_host="${hostport#\[}"
+    db_host="${db_host%%]*}"
+  else
+    db_host="${hostport%%:*}"
+  fi
+}
+
+is_local_database() {
+  if [ -z "${DATABASE_URL:-}" ]; then
+    return 0
+  fi
+
+  parse_database_url_host
+  [ "$db_host" = "localhost" ] || [ "$db_host" = "127.0.0.1" ] || [ "$db_host" = "::1" ]
+}
+
+slugify() {
+  tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_.-]/-/g; s/--*/-/g; s/^-//; s/-$//'
+}
+
+start_throwaway_postgres() {
+  local slug seed base_port port attempt container_id
+
+  slug="$(basename "$PWD" | slugify)"
+  if [ -z "$slug" ]; then
+    slug="worktree"
+  fi
+  slug="${slug:0:28}"
+  seed="$(printf '%s' "$PWD-$$" | cksum | awk '{print $1}')"
+  base_port=$((55000 + (seed % 900)))
+
+  for attempt in $(seq 0 99); do
+    port=$((55000 + ((base_port - 55000 + attempt) % 1000)))
+    CHECK_DB_CONTAINER="multica-check-${slug}-${port}-$$"
+    echo "    Starting throwaway PostgreSQL container $CHECK_DB_CONTAINER on 127.0.0.1:$port..."
+    if container_id="$(
+      docker run -d \
+        --name "$CHECK_DB_CONTAINER" \
+        -p "127.0.0.1:${port}:5432" \
+        -e "POSTGRES_DB=${POSTGRES_DB:-multica}" \
+        -e "POSTGRES_USER=${POSTGRES_USER:-multica}" \
+        -e "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-multica}" \
+        pgvector/pgvector:pg17
+    )"; then
+      POSTGRES_PORT="$port"
+      DATABASE_URL="postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB:-multica}?sslmode=disable"
+      export POSTGRES_PORT DATABASE_URL
+      echo "    PostgreSQL container started (${container_id:0:12})."
+      return 0
+    fi
+  done
+
+  echo "    ERROR: could not start throwaway PostgreSQL on a 55xxx port"
+  return 1
+}
+
+wait_for_postgres_container() {
+  local max_wait=${1:-60}
+  local elapsed=0
+
+  echo "    Waiting for PostgreSQL to be ready..."
+  until docker exec "$CHECK_DB_CONTAINER" pg_isready -U "${POSTGRES_USER:-multica}" -d "${POSTGRES_DB:-multica}" > /dev/null 2>&1; do
+    sleep 1
+    elapsed=$((elapsed + 1))
+    if [ "$elapsed" -ge "$max_wait" ]; then
+      echo "    ERROR: PostgreSQL did not start within ${max_wait}s"
+      return 1
+    fi
+  done
+  echo "    PostgreSQL ready (${elapsed}s)."
+}
+
+ensure_check_postgres() {
+  if is_local_database; then
+    echo "==> Starting isolated PostgreSQL for checks..."
+    start_throwaway_postgres
+    wait_for_postgres_container
+    echo "✓ PostgreSQL ready (throwaway Docker). Database: ${POSTGRES_DB:-multica}"
+  else
+    bash scripts/ensure-postgres.sh "$ENV_FILE"
+  fi
+}
 
 # --------------------------------------------------------------------------
 # Cleanup: kill only services this script started
 # --------------------------------------------------------------------------
 cleanup() {
+  local status=$?
+  if [ "$EXIT_CODE" -eq 0 ] && [ "$status" -ne 0 ]; then
+    EXIT_CODE="$status"
+  fi
+
   echo ""
   if [ "$STARTED_BACKEND" = true ] && [ -n "$BACKEND_PID" ]; then
     kill "$BACKEND_PID" 2>/dev/null && wait "$BACKEND_PID" 2>/dev/null || true
@@ -39,6 +139,10 @@ cleanup() {
   if [ "$STARTED_FRONTEND" = true ] && [ -n "$FRONTEND_PID" ]; then
     kill "$FRONTEND_PID" 2>/dev/null && wait "$FRONTEND_PID" 2>/dev/null || true
     echo "    Stopped frontend (PID $FRONTEND_PID)"
+  fi
+  if [ -n "$CHECK_DB_CONTAINER" ]; then
+    docker rm -f "$CHECK_DB_CONTAINER" > /dev/null 2>&1 || true
+    echo "    Removed PostgreSQL container ($CHECK_DB_CONTAINER)"
   fi
   echo ""
   if [ "$EXIT_CODE" -eq 0 ]; then
@@ -74,7 +178,7 @@ wait_for_port() {
 # --------------------------------------------------------------------------
 echo "==> Using env file: $ENV_FILE"
 echo "==> Checking PostgreSQL..."
-bash scripts/ensure-postgres.sh "$ENV_FILE"
+ensure_check_postgres
 
 # --------------------------------------------------------------------------
 # Step 1: TypeScript typecheck

@@ -38,6 +38,10 @@
     "title_tasks": "Weekly tasks",
     "partial_label": "{{range}} (partial · {{covered}} / 7 days)"
   },
+  "pricing": {
+    "unpriced_notice_one": "{{count}} model has no maintained price, so its tokens are excluded from cost totals.",
+    "unpriced_notice_other": "{{count}} models have no maintained price, so their tokens are excluded from cost totals."
+  },
   "leaderboard": {
     "title": "Leaderboard",
     "caption": "{{count}} agents",

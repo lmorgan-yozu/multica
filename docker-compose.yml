@@ -1,4 +1,4 @@
-name: multica
+name: multica-dev
 
 services:
   postgres:

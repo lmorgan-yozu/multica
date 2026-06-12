@@ -141,12 +141,16 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	agentID, ok := parseOptionalUUIDQueryParam(w, r, "agent_id")
+	if !ok {
+		return
+	}
 	// "By agent" has no date grouping in the SQL — tz only determines
 	// the cutoff boundary, not the bucket axis.
 	tz := h.resolveViewingTZ(r)
 	since := parseSinceParamInTZ(r, 30, tz)
 
-	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID)
+	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID, agentID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage by agent")
 		return
@@ -159,11 +163,13 @@ func (h *Handler) listDashboardUsageByAgent(
 	workspaceID pgtype.UUID,
 	since pgtype.Timestamptz,
 	projectID pgtype.UUID,
+	agentID pgtype.UUID,
 ) ([]DashboardUsageByAgentResponse, error) {
 	rows, err := h.Queries.ListDashboardUsageByAgent(ctx, db.ListDashboardUsageByAgentParams{
 		WorkspaceID: workspaceID,
 		Since:       since,
 		ProjectID:   projectID,
+		AgentID:     agentID,
 	})
 	if err != nil {
 		return nil, err

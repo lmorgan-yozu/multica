@@ -14,8 +14,10 @@ import type {
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
+  IssueQualityGatesResponse,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
+  QualityGateOverrideResponse,
   Squad,
   TimelineEntry,
   User,
@@ -243,6 +245,88 @@ export const GroupedIssuesResponseSchema = z.object({
 
 export const EMPTY_GROUPED_ISSUES_RESPONSE: GroupedIssuesResponse = {
   groups: [],
+};
+
+const QualityGateTransitionSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+}).loose();
+
+const QualityGateEventSchema = z.object({
+  actor_type: z.string(),
+  actor_id: z.string().nullable(),
+  created_at: z.string(),
+}).loose();
+
+const QualityGateStateSchema = z.object({
+  key: z.string(),
+  name: z.string(),
+  order: z.number(),
+  required_actor_type: z.string().optional(),
+  required_role: z.string().optional(),
+  independent: z.boolean(),
+  transition: QualityGateTransitionSchema,
+  complete: z.boolean(),
+  blocked: z.boolean(),
+  reason: z.string().optional(),
+  next_actor: z.string().optional(),
+  event: QualityGateEventSchema.optional(),
+}).loose();
+
+export const IssueQualityGatesResponseSchema = z.object({
+  enabled: z.boolean(),
+  project_id: z.string().optional(),
+  issue_id: z.string().optional(),
+  gates: z.array(QualityGateStateSchema).default([]),
+}).loose();
+
+export const EMPTY_ISSUE_QUALITY_GATES_RESPONSE: IssueQualityGatesResponse = {
+  enabled: false,
+  gates: [],
+};
+
+const QualityGateOverrideSkippedGateSchema = z.object({
+  key: z.string(),
+  name: z.string(),
+  transition: QualityGateTransitionSchema,
+  next_actor: z.string(),
+}).loose();
+
+export const QualityGateOverrideResponseSchema = z.object({
+  issue: IssueSchema,
+  override: z.object({
+    reason: z.string(),
+    skipped_gates: z.array(QualityGateOverrideSkippedGateSchema).default([]),
+  }).loose(),
+}).loose();
+
+export const EMPTY_QUALITY_GATE_OVERRIDE_RESPONSE: QualityGateOverrideResponse = {
+  issue: {
+    id: "",
+    workspace_id: "",
+    number: 0,
+    identifier: "",
+    title: "",
+    description: null,
+    status: "todo",
+    priority: "none",
+    assignee_type: null,
+    assignee_id: null,
+    creator_type: "member",
+    creator_id: "",
+    parent_issue_id: null,
+    project_id: null,
+    position: 0,
+    start_date: null,
+    due_date: null,
+    metadata: {},
+    created_at: "",
+    updated_at: "",
+  },
+  override: {
+    reason: "",
+    skipped_gates: [],
+  },
 };
 
 const SubscriberSchema = z.object({

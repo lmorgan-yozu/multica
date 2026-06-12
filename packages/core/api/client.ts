@@ -167,7 +167,9 @@ import {
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
+  EMPTY_ISSUE_QUALITY_GATES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_QUALITY_GATE_OVERRIDE_RESPONSE,
   EMPTY_SQUAD,
   EMPTY_SQUAD_LIST,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
@@ -178,8 +180,10 @@ import {
   AppConfigSchema,
   type AppConfigResponse,
   GroupedIssuesResponseSchema,
+  IssueQualityGatesResponseSchema,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
+  QualityGateOverrideResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
@@ -605,13 +609,19 @@ export class ApiClient {
   }
 
   async getIssueQualityGates(id: string): Promise<IssueQualityGatesResponse> {
-    return this.fetch(`/api/issues/${id}/quality-gates`);
+    const raw = await this.fetch<unknown>(`/api/issues/${id}/quality-gates`);
+    return parseWithFallback(raw, IssueQualityGatesResponseSchema, EMPTY_ISSUE_QUALITY_GATES_RESPONSE, {
+      endpoint: "GET /api/issues/:id/quality-gates",
+    });
   }
 
   async overrideIssueQualityGate(id: string, data: { status: string; reason: string }): Promise<QualityGateOverrideResponse> {
-    return this.fetch(`/api/issues/${id}/quality-gates/override`, {
+    const raw = await this.fetch<unknown>(`/api/issues/${id}/quality-gates/override`, {
       method: "POST",
       body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, QualityGateOverrideResponseSchema, EMPTY_QUALITY_GATE_OVERRIDE_RESPONSE, {
+      endpoint: "POST /api/issues/:id/quality-gates/override",
     });
   }
 

@@ -325,6 +325,73 @@ func newIssuePullRequestsTestCmd() *cobra.Command {
 	return cmd
 }
 
+func TestRunIssuePullRequestsAttachPostsURLAndPrintsJSON(t *testing.T) {
+	var gotPaths []string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/issues/MUL-2818":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-uuid",
+				"identifier": "MUL-2818",
+				"title":      "CLI PR attach",
+			})
+		case "/api/issues/issue-uuid/pull-requests":
+			if r.Method != http.MethodPost {
+				t.Fatalf("method = %s, want POST", r.Method)
+			}
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]any{
+				"pull_request": map[string]any{
+					"url":    "https://github.com/multica-ai/multica/pull/42",
+					"number": float64(42),
+					"state":  "open",
+					"title":  "MUL-2818 add issue PR CLI",
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssuePullRequestsTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runIssuePullRequestsAttach(cmd, []string{"MUL-2818", "https://github.com/multica-ai/multica/pull/42"})
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("runIssuePullRequestsAttach: %v", err)
+	}
+
+	if want := []string{"/api/issues/MUL-2818", "/api/issues/issue-uuid/pull-requests"}; fmt.Sprint(gotPaths) != fmt.Sprint(want) {
+		t.Fatalf("paths = %v, want %v", gotPaths, want)
+	}
+	if gotBody["url"] != "https://github.com/multica-ai/multica/pull/42" {
+		t.Fatalf("body = %#v", gotBody)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, string(out))
+	}
+	pr, _ := payload["pull_request"].(map[string]any)
+	if pr["number"] != float64(42) || pr["state"] != "open" {
+		t.Fatalf("unexpected PR payload: %#v", pr)
+	}
+}
+
 func TestRunIssuePullRequestsListsLinkedPRsAsJSON(t *testing.T) {
 	var gotPaths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

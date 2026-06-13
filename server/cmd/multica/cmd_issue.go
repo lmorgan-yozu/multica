@@ -109,6 +109,13 @@ var issuePullRequestsCmd = &cobra.Command{
 	RunE:    runIssuePullRequests,
 }
 
+var issuePullRequestsAttachCmd = &cobra.Command{
+	Use:   "attach <id> <url>",
+	Short: "Attach a GitHub pull request to an issue",
+	Args:  exactArgs(2),
+	RunE:  runIssuePullRequestsAttach,
+}
+
 var issueUsageCmd = &cobra.Command{
 	Use:   "usage <id>",
 	Short: "Show token usage and missing usage for an issue",
@@ -269,6 +276,7 @@ var validIssueStatuses = []string{
 func init() {
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueGetCmd)
+	issuePullRequestsCmd.AddCommand(issuePullRequestsAttachCmd)
 	issueCmd.AddCommand(issuePullRequestsCmd)
 	issueCmd.AddCommand(issueUsageCmd)
 	issueCmd.AddCommand(issueCreateCmd)
@@ -311,6 +319,7 @@ func init() {
 
 	// issue pull-requests
 	issuePullRequestsCmd.Flags().String("output", "table", "Output format: table or json")
+	issuePullRequestsAttachCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue usage
 	issueUsageCmd.Flags().String("output", "table", "Output format: table or json")
@@ -957,6 +966,40 @@ func runIssuePullRequests(cmd *cobra.Command, args []string) error {
 
 	prs, _ := result["pull_requests"].([]any)
 	printIssuePullRequestsTable(normalizePullRequestList(prs))
+	return nil
+}
+
+func runIssuePullRequestsAttach(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/pull-requests", map[string]any{
+		"url": args[1],
+	}, &result); err != nil {
+		return fmt.Errorf("attach issue pull request: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	if pr, ok := result["pull_request"].(map[string]any); ok {
+		printIssuePullRequestsTable([]map[string]any{pr})
+		return nil
+	}
+	printIssuePullRequestsTable(nil)
 	return nil
 }
 

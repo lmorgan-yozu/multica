@@ -68,6 +68,52 @@ func TestExtractIdentifiers(t *testing.T) {
 	}
 }
 
+func TestParseGitHubPullRequestURL(t *testing.T) {
+	cases := []struct {
+		name       string
+		raw        string
+		wantOwner  string
+		wantRepo   string
+		wantNumber int32
+		wantOK     bool
+	}{
+		{
+			name:       "canonical",
+			raw:        "https://github.com/acme/widget/pull/123",
+			wantOwner:  "acme",
+			wantRepo:   "widget",
+			wantNumber: 123,
+			wantOK:     true,
+		},
+		{
+			name:       "trailing_slash_and_query",
+			raw:        "https://github.com/acme/widget/pull/456/?foo=bar",
+			wantOwner:  "acme",
+			wantRepo:   "widget",
+			wantNumber: 456,
+			wantOK:     true,
+		},
+		{name: "wrong_host", raw: "https://gitlab.com/acme/widget/-/merge_requests/1"},
+		{name: "missing_number", raw: "https://github.com/acme/widget/pull/not-a-number"},
+		{name: "not_pull_request", raw: "https://github.com/acme/widget/issues/123"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseGitHubPullRequestURL(tc.raw)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if got.Owner != tc.wantOwner || got.Repo != tc.wantRepo || got.Number != tc.wantNumber {
+				t.Fatalf("parsed = %+v, want owner=%q repo=%q number=%d", got, tc.wantOwner, tc.wantRepo, tc.wantNumber)
+			}
+		})
+	}
+}
+
 func TestExtractClosingIdentifiers(t *testing.T) {
 	cases := []struct {
 		name string

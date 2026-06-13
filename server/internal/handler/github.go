@@ -92,6 +92,16 @@ type GitHubConnectResponse struct {
 	Configured bool   `json:"configured"`
 }
 
+type attachPullRequestRequest struct {
+	URL string `json:"url"`
+}
+
+type parsedGitHubPullRequestURL struct {
+	Owner  string
+	Repo   string
+	Number int32
+}
+
 func githubInstallationToResponse(i db.GithubInstallation) GitHubInstallationResponse {
 	instID := i.InstallationID
 	return GitHubInstallationResponse{
@@ -196,6 +206,29 @@ func aggregateChecksConclusion(failed, passed, pending, total int64) *string {
 		return nil
 	}
 	return &v
+}
+
+func parseGitHubPullRequestURL(raw string) (parsedGitHubPullRequestURL, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return parsedGitHubPullRequestURL{}, false
+	}
+	if u.Scheme != "https" || !strings.EqualFold(u.Hostname(), "github.com") {
+		return parsedGitHubPullRequestURL{}, false
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) != 4 || parts[0] == "" || parts[1] == "" || parts[2] != "pull" {
+		return parsedGitHubPullRequestURL{}, false
+	}
+	n, err := strconv.ParseInt(parts[3], 10, 32)
+	if err != nil || n <= 0 {
+		return parsedGitHubPullRequestURL{}, false
+	}
+	return parsedGitHubPullRequestURL{
+		Owner:  parts[0],
+		Repo:   parts[1],
+		Number: int32(n),
+	}, true
 }
 
 // ── Connect / state token ───────────────────────────────────────────────────
@@ -478,6 +511,71 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 		out = append(out, issuePullRequestRowToResponse(row))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"pull_requests": out})
+}
+
+// AttachPullRequestToIssue links an already mirrored GitHub PR to an issue.
+// Actor contract: any actor that can access the issue may attach; the PR row
+// must already belong to the same workspace, which prevents cross-workspace
+// or unconfigured-repository links. Unknown PRs fail closed until the GitHub
+// integration has observed/refreshed them.
+func (h *Handler) AttachPullRequestToIssue(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	var req attachPullRequestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	ref, ok := parseGitHubPullRequestURL(req.URL)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "url must be a GitHub pull request URL like https://github.com/owner/repo/pull/123")
+		return
+	}
+
+	pr, err := h.Queries.GetGitHubPullRequest(r.Context(), db.GetGitHubPullRequestParams{
+		WorkspaceID: issue.WorkspaceID,
+		RepoOwner:   ref.Owner,
+		RepoName:    ref.Repo,
+		PrNumber:    ref.Number,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "pull request has not been mirrored for this workspace yet; wait for GitHub sync or use a PR from a configured repository")
+			return
+		}
+		slog.Warn("github: lookup pr for manual attach failed", "err", err, "issue_id", uuidToString(issue.ID), "url", req.URL)
+		writeError(w, http.StatusInternalServerError, "failed to attach pull request")
+		return
+	}
+
+	workspaceID := uuidToString(issue.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if err := h.Queries.LinkIssueToPullRequest(r.Context(), db.LinkIssueToPullRequestParams{
+		IssueID:             issue.ID,
+		PullRequestID:       pr.ID,
+		CloseIntent:         false,
+		PreserveCloseIntent: true,
+		LinkedByType:        strToText(actorType),
+		LinkedByID:          parseUUID(actorID),
+	}); err != nil {
+		slog.Warn("github: manual link failed", "err", err, "issue_id", uuidToString(issue.ID), "pr_id", uuidToString(pr.ID))
+		writeError(w, http.StatusInternalServerError, "failed to attach pull request")
+		return
+	}
+
+	resp := githubPullRequestToResponse(pr)
+	h.publish(protocol.EventPullRequestUpdated, workspaceID, actorType, actorID, map[string]any{
+		"pull_request":     resp,
+		"linked_issue_ids": []string{uuidToString(issue.ID)},
+	})
+	writeJSON(w, http.StatusCreated, map[string]any{"pull_request": resp})
 }
 
 // ── Webhook ─────────────────────────────────────────────────────────────────

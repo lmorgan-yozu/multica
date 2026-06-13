@@ -723,6 +723,79 @@ func (q *Queries) CompleteAgentTask(ctx context.Context, arg CompleteAgentTaskPa
 	return i, err
 }
 
+const consumeDueCapResumeTask = `-- name: ConsumeDueCapResumeTask :one
+UPDATE agent_task_queue
+SET resume_at = NULL
+WHERE id = $1
+  AND status = 'failed'
+  AND resume_at IS NOT NULL
+  AND resume_at <= now()
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, resume_at
+`
+
+// Atomically claims one due cap-resume row by clearing resume_at. The due-time
+// and failed-status guards make the operation idempotent under concurrent
+// sweepers and prevent early resumes.
+func (q *Queries) ConsumeDueCapResumeTask(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, consumeDueCapResumeTask, id)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.ResumeAt,
+	)
+	return i, err
+}
+
+const countConsecutiveCapFailuresInTaskChain = `-- name: CountConsecutiveCapFailuresInTaskChain :one
+WITH RECURSIVE cap_chain AS (
+    SELECT atq.id, atq.parent_task_id, atq.failure_reason
+    FROM agent_task_queue atq
+    WHERE atq.id = $1
+      AND atq.failure_reason IN ('agent_error.provider_quota_limit', 'agent_error.provider_capacity_or_rate_limit')
+  UNION ALL
+    SELECT p.id, p.parent_task_id, p.failure_reason
+    FROM agent_task_queue p
+    JOIN cap_chain c ON c.parent_task_id = p.id
+    WHERE p.failure_reason IN ('agent_error.provider_quota_limit', 'agent_error.provider_capacity_or_rate_limit')
+)
+SELECT count(*)::int AS count FROM cap_chain
+`
+
+// Counts the current task plus contiguous parent tasks that failed for the
+// cap-class reasons. A non-cap parent stops the chain because a normal
+// completion or different failure ends this cap-resume cycle.
+func (q *Queries) CountConsecutiveCapFailuresInTaskChain(ctx context.Context, id pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countConsecutiveCapFailuresInTaskChain, id)
+	var count int32
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRunningTasks = `-- name: CountRunningTasks :one
 SELECT count(*) FROM agent_task_queue
 WHERE agent_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
@@ -1636,6 +1709,28 @@ func (q *Queries) HasActiveTaskForIssue(ctx context.Context, issueID pgtype.UUID
 	return has_active, err
 }
 
+const hasActiveTaskForIssueAndAgent = `-- name: HasActiveTaskForIssueAndAgent :one
+SELECT count(*) > 0 AS has_active FROM agent_task_queue
+WHERE issue_id = $1
+  AND agent_id = $2
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+`
+
+type HasActiveTaskForIssueAndAgentParams struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	AgentID pgtype.UUID `json:"agent_id"`
+}
+
+// Returns true if the agent already has any live task for the issue. Used by
+// cap-resume dedupe; unlike HasPendingTaskForIssueAndAgent this includes
+// running tasks because a resumed cap task must not overlap live work.
+func (q *Queries) HasActiveTaskForIssueAndAgent(ctx context.Context, arg HasActiveTaskForIssueAndAgentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveTaskForIssueAndAgent, arg.IssueID, arg.AgentID)
+	var has_active bool
+	err := row.Scan(&has_active)
+	return has_active, err
+}
+
 const hasPendingTaskForIssue = `-- name: HasPendingTaskForIssue :one
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched')
@@ -2005,6 +2100,66 @@ func (q *Queries) ListAllAgents(ctx context.Context, workspaceID pgtype.UUID) ([
 			&i.McpConfig,
 			&i.Model,
 			&i.ThinkingLevel,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDueCapResumeTasks = `-- name: ListDueCapResumeTasks :many
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, resume_at FROM agent_task_queue
+WHERE status = 'failed'
+  AND resume_at IS NOT NULL
+  AND resume_at <= now()
+ORDER BY resume_at ASC, created_at ASC
+LIMIT $1
+`
+
+// ADA-45: scheduler candidates for capped failed tasks whose resume time has
+// passed. The caller consumes resume_at in a per-task transaction before
+// creating any child task so racing sweepers do not double-resume.
+func (q *Queries) ListDueCapResumeTasks(ctx context.Context, limit int32) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, listDueCapResumeTasks, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.ResumeAt,
 		); err != nil {
 			return nil, err
 		}

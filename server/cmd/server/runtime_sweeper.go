@@ -57,6 +57,10 @@ const (
 	// ticks and 500 rows/tick we drain 60k rows/hour worst case — plenty
 	// of headroom for the documented backlog without monopolising DB CPU.
 	queuedExpireBatchSize = 500
+	// capResumeBatchSize caps due cap-resume promotions per tick. It mirrors
+	// the queued-expiry batch size so a provider outage recovery cannot
+	// monopolise the sweeper transaction budget.
+	capResumeBatchSize = 500
 )
 
 // runRuntimeSweeper periodically marks runtimes as offline if their
@@ -82,6 +86,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
+			sweepDueCapResumes(ctx, taskSvc)
 			gcRuntimes(ctx, queries, bus)
 		}
 	}
@@ -280,6 +285,15 @@ func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *
 	slog.Info("task sweeper: expired stale queued tasks", "count", len(failedTasks))
 	taskSvc.CaptureQueuedExpiredTasks(ctx, failedTasks)
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
+}
+
+func sweepDueCapResumes(ctx context.Context, taskSvc *service.TaskService) {
+	if taskSvc == nil {
+		return
+	}
+	if resumed := taskSvc.SweepDueCapResumes(ctx, capResumeBatchSize); resumed > 0 {
+		slog.Info("cap resume sweeper: resumed due tasks", "count", resumed)
+	}
 }
 
 // broadcastFailedTasks is preserved as a thin shim for the integration tests

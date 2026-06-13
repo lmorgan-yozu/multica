@@ -442,6 +442,55 @@ UPDATE agent_task_queue
 SET resume_at = $2
 WHERE id = $1 AND status = 'failed';
 
+-- name: ListDueCapResumeTasks :many
+-- ADA-45: scheduler candidates for capped failed tasks whose resume time has
+-- passed. The caller consumes resume_at in a per-task transaction before
+-- creating any child task so racing sweepers do not double-resume.
+SELECT * FROM agent_task_queue
+WHERE status = 'failed'
+  AND resume_at IS NOT NULL
+  AND resume_at <= now()
+ORDER BY resume_at ASC, created_at ASC
+LIMIT $1;
+
+-- name: ConsumeDueCapResumeTask :one
+-- Atomically claims one due cap-resume row by clearing resume_at. The due-time
+-- and failed-status guards make the operation idempotent under concurrent
+-- sweepers and prevent early resumes.
+UPDATE agent_task_queue
+SET resume_at = NULL
+WHERE id = $1
+  AND status = 'failed'
+  AND resume_at IS NOT NULL
+  AND resume_at <= now()
+RETURNING *;
+
+-- name: CountConsecutiveCapFailuresInTaskChain :one
+-- Counts the current task plus contiguous parent tasks that failed for the
+-- cap-class reasons. A non-cap parent stops the chain because a normal
+-- completion or different failure ends this cap-resume cycle.
+WITH RECURSIVE cap_chain AS (
+    SELECT atq.id, atq.parent_task_id, atq.failure_reason
+    FROM agent_task_queue atq
+    WHERE atq.id = $1
+      AND atq.failure_reason IN ('agent_error.provider_quota_limit', 'agent_error.provider_capacity_or_rate_limit')
+  UNION ALL
+    SELECT p.id, p.parent_task_id, p.failure_reason
+    FROM agent_task_queue p
+    JOIN cap_chain c ON c.parent_task_id = p.id
+    WHERE p.failure_reason IN ('agent_error.provider_quota_limit', 'agent_error.provider_capacity_or_rate_limit')
+)
+SELECT count(*)::int AS count FROM cap_chain;
+
+-- name: HasActiveTaskForIssueAndAgent :one
+-- Returns true if the agent already has any live task for the issue. Used by
+-- cap-resume dedupe; unlike HasPendingTaskForIssueAndAgent this includes
+-- running tasks because a resumed cap task must not overlap live work.
+SELECT count(*) > 0 AS has_active FROM agent_task_queue
+WHERE issue_id = $1
+  AND agent_id = $2
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
+
 -- name: UpdateAgentTaskSession :exec
 -- Pins the resume pointer mid-flight so a daemon crash leaves a usable
 -- session_id/work_dir on the task row. No-op if the task is no longer

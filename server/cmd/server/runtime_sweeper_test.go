@@ -5,8 +5,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -73,9 +75,73 @@ func setupSweeperTestFixture(t *testing.T, taskStatus string) (string, string, s
 func cleanupSweeperFixture(t *testing.T, issueID, agentID string) {
 	t.Helper()
 	ctx := context.Background()
+	testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
 	testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
 	testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
 	testPool.Exec(ctx, `UPDATE agent SET status = 'idle' WHERE id = $1`, agentID)
+}
+
+func setupCapResumeSweeperFixture(t *testing.T, workspaceSettings *string) (string, string, string, string) {
+	t.Helper()
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a
+		JOIN member m ON m.workspace_id = a.workspace_id
+		JOIN "user" u ON u.id = m.user_id
+		WHERE u.email = $1
+		LIMIT 1
+	`, integrationTestEmail).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("failed to find test agent: %v", err)
+	}
+	if workspaceSettings != nil {
+		var previousSettings []byte
+		if err := testPool.QueryRow(ctx, `SELECT settings FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&previousSettings); err != nil {
+			t.Fatalf("read workspace settings: %v", err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `UPDATE workspace SET settings = $2 WHERE id = $1`, testWorkspaceID, previousSettings)
+		})
+		if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = $2::jsonb WHERE id = $1`, testWorkspaceID, *workspaceSettings); err != nil {
+			t.Fatalf("update workspace settings: %v", err)
+		}
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		WITH bumped AS (
+			UPDATE workspace SET issue_counter = issue_counter + 1
+			WHERE id = $1 RETURNING issue_counter
+		)
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			assignee_type, assignee_id, number
+		)
+		SELECT $1, 'Cap resume sweeper test', 'in_progress', 'none',
+		       'member', m.user_id, 'agent', $2, (SELECT issue_counter FROM bumped)
+		FROM member m WHERE m.workspace_id = $1 LIMIT 1
+		RETURNING id
+	`, testWorkspaceID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("failed to create cap resume issue: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, completed_at,
+			failure_reason, resume_at, attempt, max_attempts
+		)
+		VALUES (
+			$1, $2, $3, 'failed', 0, now() - interval '1 minute',
+			'agent_error.provider_quota_limit', now() - interval '1 minute', 0, 3
+		)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("failed to create due cap task: %v", err)
+	}
+
+	return issueID, agentID, runtimeID, taskID
 }
 
 func TestRefreshAgentStatusFromTasks(t *testing.T) {
@@ -201,6 +267,155 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 	}
 	if status != "failed" {
 		t.Fatalf("expected task status 'failed', got '%s'", status)
+	}
+}
+
+func TestSweepDueCapResumesEnqueuesRetryAndClearsSchedule(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+	issueID, agentID, _, taskID := setupCapResumeSweeperFixture(t, nil)
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+
+	sweepDueCapResumes(ctx, taskSvc)
+
+	var parentResumeAt *time.Time
+	if err := testPool.QueryRow(ctx, `
+		SELECT resume_at FROM agent_task_queue WHERE id = $1
+	`, taskID).Scan(&parentResumeAt); err != nil {
+		t.Fatalf("read parent resume_at: %v", err)
+	}
+	if parentResumeAt != nil {
+		t.Fatalf("parent resume_at = %v, want consumed NULL", *parentResumeAt)
+	}
+
+	var childID string
+	var childAttempt, childMaxAttempts int
+	if err := testPool.QueryRow(ctx, `
+		SELECT id, attempt, max_attempts
+		FROM agent_task_queue
+		WHERE parent_task_id = $1 AND status = 'queued'
+	`, taskID).Scan(&childID, &childAttempt, &childMaxAttempts); err != nil {
+		t.Fatalf("read retry child: %v", err)
+	}
+	if childID == "" {
+		t.Fatal("expected queued retry child")
+	}
+	if childAttempt != 1 || childMaxAttempts != 3 {
+		t.Fatalf("child attempt/max = %d/%d, want 1/3", childAttempt, childMaxAttempts)
+	}
+
+	var content string
+	if err := testPool.QueryRow(ctx, `
+		SELECT content FROM comment
+		WHERE issue_id = $1 AND author_type = 'system'
+		ORDER BY created_at DESC LIMIT 1
+	`, issueID).Scan(&content); err != nil {
+		t.Fatalf("read resume comment: %v", err)
+	}
+	for _, want := range []string{"resuming automatically", "resume attempt 1 of 3"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("resume comment %q missing %q", content, want)
+		}
+	}
+}
+
+func TestSweepDueCapResumesDedupesExistingActiveTaskAndConsumesSchedule(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+	issueID, agentID, runtimeID, taskID := setupCapResumeSweeperFixture(t, nil)
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at)
+		VALUES ($1, $2, $3, 'running', 0, now())
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert active task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	taskSvc := service.NewTaskService(queries, testPool, nil, events.New())
+
+	sweepDueCapResumes(ctx, taskSvc)
+
+	var childCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM agent_task_queue WHERE parent_task_id = $1
+	`, taskID).Scan(&childCount); err != nil {
+		t.Fatalf("count retry children: %v", err)
+	}
+	if childCount != 0 {
+		t.Fatalf("retry children = %d, want 0 when an active task already exists", childCount)
+	}
+	var resumeAt *time.Time
+	if err := testPool.QueryRow(ctx, `SELECT resume_at FROM agent_task_queue WHERE id = $1`, taskID).Scan(&resumeAt); err != nil {
+		t.Fatalf("read consumed resume_at: %v", err)
+	}
+	if resumeAt != nil {
+		t.Fatalf("resume_at = %v, want consumed NULL", *resumeAt)
+	}
+}
+
+func TestSweepDueCapResumesBlocksAfterExhaustedAttempts(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+	settings := `{"session_cap_resilience": {"enabled": true, "default_backoff_minutes": 60, "max_resume_attempts": 1}}`
+	issueID, agentID, runtimeID, firstTaskID := setupCapResumeSweeperFixture(t, &settings)
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+	var secondTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, completed_at,
+			failure_reason, resume_at, parent_task_id, attempt, max_attempts
+		)
+		VALUES (
+			$1, $2, $3, 'failed', 0, now() - interval '1 minute',
+			'agent_error.provider_quota_limit', now() - interval '1 minute', $4, 1, 3
+		)
+		RETURNING id
+	`, agentID, runtimeID, issueID, firstTaskID).Scan(&secondTaskID); err != nil {
+		t.Fatalf("insert second cap failure: %v", err)
+	}
+
+	queries := db.New(testPool)
+	taskSvc := service.NewTaskService(queries, testPool, nil, events.New())
+
+	sweepDueCapResumes(ctx, taskSvc)
+
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&status); err != nil {
+		t.Fatalf("read issue status: %v", err)
+	}
+	if status != "blocked" {
+		t.Fatalf("issue status = %q, want blocked", status)
+	}
+	var childCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM agent_task_queue WHERE parent_task_id = $1
+	`, secondTaskID).Scan(&childCount); err != nil {
+		t.Fatalf("count retry children: %v", err)
+	}
+	if childCount != 0 {
+		t.Fatalf("retry children = %d, want 0 after exhausted cap attempts", childCount)
+	}
+	var content string
+	if err := testPool.QueryRow(ctx, `
+		SELECT content FROM comment
+		WHERE issue_id = $1 AND author_type = 'system'
+		ORDER BY created_at DESC LIMIT 1
+	`, issueID).Scan(&content); err != nil {
+		t.Fatalf("read blocked comment: %v", err)
+	}
+	if !strings.Contains(content, "repeated provider caps") || !strings.Contains(content, "blocked") {
+		t.Fatalf("blocked comment = %q, want readable cap exhaustion history", content)
 	}
 }
 

@@ -66,6 +66,23 @@
     "toast_project_deleted": "已删除项目",
     "toast_move_issue_failed": "移动 issue 失败"
   },
+  "roadmap": {
+    "title": "路线图",
+    "summary": "{{epicCount}} 个 epic，分布在 {{milestoneCount}} 个里程碑",
+    "progress": "进度",
+    "ungrouped_title": "项目路径",
+    "date_target": "目标",
+    "date_due": "截止",
+    "depends_on": "依赖 {{labels}}",
+    "blocked": "已阻塞",
+    "blocked_count": "{{count}} 个阻塞",
+    "cycle_detected": "检测到依赖循环",
+    "empty_title": "还没有路线图",
+    "empty_hint": "带父子关系的项目 issue 会作为 epic 显示在这里；添加里程碑和依赖后会细化路径。",
+    "error_title": "路线图加载失败",
+    "error_hint": "下方的项目 issue 视图仍可使用。",
+    "retry": "重试"
+  },
   "resources": {
     "section_header": "资源",
     "empty": "还没有关联资源。",

@@ -77,6 +77,7 @@ import type {
   PendingChatTasksResponse,
   SendChatMessageResponse,
   Project,
+  ProjectRoadmap,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -169,6 +170,7 @@ import {
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_ISSUE_QUALITY_GATES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_PROJECT_ROADMAP,
   EMPTY_QUALITY_GATE_OVERRIDE_RESPONSE,
   EMPTY_SQUAD,
   EMPTY_SQUAD_LIST,
@@ -183,6 +185,7 @@ import {
   IssueQualityGatesResponseSchema,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
+  ProjectRoadmapSchema,
   QualityGateOverrideResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -1894,6 +1897,13 @@ export class ApiClient {
 
   async getProject(id: string): Promise<Project> {
     return this.fetch(`/api/projects/${id}`);
+  }
+
+  async getProjectRoadmap(id: string): Promise<ProjectRoadmap> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/roadmap`);
+    return parseWithFallback(raw, ProjectRoadmapSchema, EMPTY_PROJECT_ROADMAP, {
+      endpoint: "GET /api/projects/:id/roadmap",
+    });
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {

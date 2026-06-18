@@ -25,3 +25,10 @@ export function projectDetailOptions(wsId: string, id: string) {
     queryFn: () => api.getProject(id),
   });
 }
+
+export function projectRoadmapOptions(wsId: string, id: string) {
+  return queryOptions({
+    queryKey: projectKeys.roadmap(wsId, id),
+    queryFn: () => api.getProjectRoadmap(id),
+  });
+}

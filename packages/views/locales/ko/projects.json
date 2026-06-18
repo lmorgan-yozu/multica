@@ -66,6 +66,23 @@
     "toast_project_deleted": "프로젝트를 삭제했습니다",
     "toast_move_issue_failed": "이슈를 이동하지 못했습니다"
   },
+  "roadmap": {
+    "title": "로드맵",
+    "summary": "마일스톤 {{milestoneCount}}개에 에픽 {{epicCount}}개",
+    "progress": "진행률",
+    "ungrouped_title": "프로젝트 경로",
+    "date_target": "목표",
+    "date_due": "마감",
+    "depends_on": "{{labels}}에 의존",
+    "blocked": "차단됨",
+    "blocked_count": "{{count}}개 차단됨",
+    "cycle_detected": "의존성 순환이 감지되었습니다",
+    "empty_title": "아직 로드맵이 없습니다",
+    "empty_hint": "상하위 관계가 있는 프로젝트 이슈가 에픽으로 여기에 표시됩니다. 마일스톤과 의존성을 추가하면 경로가 더 명확해집니다.",
+    "error_title": "로드맵을 불러오지 못했습니다",
+    "error_hint": "아래의 프로젝트 이슈 보기는 계속 사용할 수 있습니다.",
+    "retry": "다시 시도"
+  },
   "resources": {
     "section_header": "리소스",
     "empty": "첨부된 리소스가 없습니다.",

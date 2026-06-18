@@ -6,6 +6,7 @@ import {
   DuplicateIssueErrorBodySchema,
   EMPTY_USER,
   ListIssuesResponseSchema,
+  ProjectRoadmapSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
@@ -85,6 +86,72 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
       total: 1,
     };
     expect(ListIssuesResponseSchema.safeParse(payload).success).toBe(false);
+  });
+});
+
+describe("ProjectRoadmapSchema", () => {
+  it("preserves milestones, epics, dependencies, and roadmap metadata", () => {
+    const parsed = ProjectRoadmapSchema.parse({
+      project_id: "project-1",
+      project_title: "Ada Bootstrapping",
+      milestones: [
+        {
+          id: "milestone-1",
+          name: "Demo path",
+          target_date: "2026-07-01",
+          progress: { done: 2, total: 4 },
+          blocked_count: 1,
+          epic_ids: ["epic-2", "epic-1"],
+        },
+      ],
+      epics: [
+        {
+          id: "epic-1",
+          identifier: "ADA-1",
+          number: 1,
+          title: "Foundation",
+          status: "done",
+          priority: "high",
+          progress: { done: 2, total: 2 },
+          depends_on: [],
+        },
+        {
+          id: "epic-2",
+          identifier: "ADA-2",
+          number: 2,
+          title: "Delivery path",
+          status: "blocked",
+          priority: "urgent",
+          progress: { done: 0, total: 2 },
+          blocked_count: 1,
+          depends_on: ["epic-1"],
+        },
+      ],
+      cycle_detected: true,
+      cycle_issue_ids: ["epic-2"],
+    });
+
+    expect(parsed.milestones[0]?.epic_ids).toEqual(["epic-2", "epic-1"]);
+    expect(parsed.epics[1]?.depends_on).toEqual(["epic-1"]);
+    expect(parsed.epics[1]?.milestone_id).toBeNull();
+    expect(parsed.cycle_detected).toBe(true);
+  });
+
+  it("defaults optional projection arrays and rollup fields", () => {
+    const parsed = ProjectRoadmapSchema.parse({
+      project_id: "project-1",
+      epics: [
+        {
+          id: "epic-1",
+          title: "Derived epic",
+        },
+      ],
+    });
+
+    expect(parsed.milestones).toEqual([]);
+    expect(parsed.epics[0]?.progress).toEqual({ done: 0, total: 0 });
+    expect(parsed.epics[0]?.depends_on).toEqual([]);
+    expect(parsed.cycle_detected).toBe(false);
   });
 });
 

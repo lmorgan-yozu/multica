@@ -66,6 +66,23 @@
     "toast_project_deleted": "プロジェクトを削除しました",
     "toast_move_issue_failed": "イシューを移動できませんでした"
   },
+  "roadmap": {
+    "title": "ロードマップ",
+    "summary": "{{milestoneCount}} 個のマイルストーンに {{epicCount}} 個のエピック",
+    "progress": "進捗",
+    "ungrouped_title": "プロジェクトパス",
+    "date_target": "目標",
+    "date_due": "期限",
+    "depends_on": "{{labels}} に依存",
+    "blocked": "ブロック中",
+    "blocked_count": "{{count}} 件ブロック中",
+    "cycle_detected": "依存関係の循環を検出しました",
+    "empty_title": "ロードマップはまだありません",
+    "empty_hint": "親子関係のあるプロジェクトイシューがエピックとしてここに表示されます。マイルストーンと依存関係を追加するとパスが明確になります。",
+    "error_title": "ロードマップを読み込めませんでした",
+    "error_hint": "下のプロジェクトイシュー表示は引き続き利用できます。",
+    "retry": "再試行"
+  },
   "resources": {
     "section_header": "リソース",
     "empty": "添付されたリソースはありません。",

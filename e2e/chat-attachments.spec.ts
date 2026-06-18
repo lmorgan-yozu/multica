@@ -83,12 +83,9 @@ test.describe("Chat attachments", () => {
     api.setWorkspaceSlug(ws.slug);
     api.setWorkspaceId(ws.id);
 
-    const userRow = await pgc.query(
-      `SELECT id FROM "user" WHERE email = $1 LIMIT 1`,
-      ["e2e@multica.ai"],
-    );
-    if (userRow.rows.length === 0) throw new Error("e2e user missing");
-    const userId = userRow.rows[0].id as string;
+    // Seed rows as the logged-in e2e user (worker-scoped email — never
+    // hardcode it) so the upload caller owns the chat session.
+    const userId = (await api.getMe()).id;
 
     // Seed runtime + agent + chat_session.
     const runtimeIns = await pgc.query(

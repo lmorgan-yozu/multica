@@ -6,6 +6,7 @@
 
 import "./env";
 import pg from "pg";
+import type { Page } from "@playwright/test";
 
 // `||` (not `??`) so an empty `NEXT_PUBLIC_API_URL=` in .env still falls
 // back to localhost. dotenv sets unset-vs-empty both as "" — treating them
@@ -25,7 +26,12 @@ export class TestApiClient {
   private workspaceId: string | null = null;
   private createdIssueIds: string[] = [];
 
-  async login(email: string, name: string) {
+  /**
+   * Request a verification code for the email and read it from the database.
+   * Cleans up codes for the email both before (rate-limit reset) and after
+   * the caller verifies, via the returned `done` callback.
+   */
+  private async requestCode(email: string): Promise<{ code: string; done: () => Promise<void> }> {
     const client = new pg.Client(DATABASE_URL);
     await client.connect();
     try {
@@ -33,7 +39,6 @@ export class TestApiClient {
       // per-email send-code rate limit.
       await client.query("DELETE FROM verification_code WHERE email = $1", [email]);
 
-      // Step 1: Send verification code
       const sendRes = await fetch(`${API_BASE}/auth/send-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -43,7 +48,6 @@ export class TestApiClient {
         throw new Error(`send-code failed: ${sendRes.status}`);
       }
 
-      // Step 2: Read code from database
       const result = await client.query(
         "SELECT code FROM verification_code WHERE email = $1 AND used = FALSE AND expires_at > now() ORDER BY created_at DESC LIMIT 1",
         [email],
@@ -51,38 +55,128 @@ export class TestApiClient {
       if (result.rows.length === 0) {
         throw new Error(`No verification code found for ${email}`);
       }
+      const code: string = result.rows[0].code;
 
-      // Step 3: Verify code to get JWT
-      const verifyRes = await fetch(`${API_BASE}/auth/verify-code`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, code: result.rows[0].code }),
-      });
-      if (!verifyRes.ok) {
-        throw new Error(`verify-code failed: ${verifyRes.status}`);
-      }
-      const data = await verifyRes.json();
-
-      this.token = data.token;
-
-      // Update user name if needed
-      if (name && data.user?.name !== name) {
-        await this.authedFetch("/api/me", {
-          method: "PATCH",
-          body: JSON.stringify({ name }),
-        });
-      }
-
-      await client.query("DELETE FROM verification_code WHERE email = $1", [email]);
-
-      return data;
+      return {
+        code,
+        done: async () => {
+          const cleanup = new pg.Client(DATABASE_URL);
+          await cleanup.connect();
+          try {
+            await cleanup.query("DELETE FROM verification_code WHERE email = $1", [email]);
+          } finally {
+            await cleanup.end();
+          }
+        },
+      };
     } finally {
       await client.end();
     }
   }
 
+  private async applyLogin(data: { token?: string; user?: { name?: string } }, name: string) {
+    if (!data.token) throw new Error("verify-code response had no token");
+    this.token = data.token;
+
+    // Update user name if needed
+    if (name && data.user?.name !== name) {
+      await this.authedFetch("/api/me", {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      });
+    }
+  }
+
+  /** Log in via the API only (no browser session). Use for data setup/teardown. */
+  async login(email: string, name: string) {
+    const { code, done } = await this.requestCode(email);
+    try {
+      const verifyRes = await fetch(`${API_BASE}/auth/verify-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code }),
+      });
+      if (!verifyRes.ok) {
+        throw new Error(`verify-code failed: ${verifyRes.status}`);
+      }
+      const data = await verifyRes.json();
+      await this.applyLogin(data, name);
+      return data;
+    } finally {
+      await done();
+    }
+  }
+
+  /**
+   * Log in AND authenticate the browser session in one flow.
+   *
+   * Sends verify-code through the page's request context (same-origin via
+   * the Next.js rewrite), so the backend's HttpOnly auth + CSRF cookies land
+   * in the browser's cookie jar — the same cookie-auth session a real user
+   * gets. The localStorage `multica_token` path is the deprecated legacy
+   * mode and must not be used for new tests: a transient fetch failure
+   * during auth init deletes the injected token mid-navigation.
+   *
+   * Also keeps the Bearer token on this client for API setup/teardown.
+   */
+  async loginInBrowser(page: Page, email: string, name: string) {
+    const { code, done } = await this.requestCode(email);
+    try {
+      const verifyRes = await page.request.post("/auth/verify-code", {
+        data: { email, code },
+      });
+      if (!verifyRes.ok()) {
+        throw new Error(`verify-code failed: ${verifyRes.status()}`);
+      }
+      const data = await verifyRes.json();
+      await this.applyLogin(data, name);
+      return data;
+    } finally {
+      await done();
+    }
+  }
+
+  /**
+   * Mark the logged-in user as onboarded. Workspace routes hard-gate on
+   * `onboarded_at`; fresh e2e users must call this before visiting
+   * /{slug}/... pages. Records a skipped-everything questionnaire first —
+   * without a resolved source the SourceBackfillModal floats over the
+   * workspace and intercepts clicks. Idempotent. Onboarding specs
+   * deliberately skip this method.
+   */
+  async completeOnboarding() {
+    const patchRes = await this.authedFetch("/api/me/onboarding", {
+      method: "PATCH",
+      body: JSON.stringify({
+        questionnaire: {
+          source_skipped: true,
+          role_skipped: true,
+          use_case_skipped: true,
+          version: 2,
+        },
+      }),
+    });
+    if (!patchRes.ok) {
+      throw new Error(`patch onboarding questionnaire failed: ${patchRes.status}`);
+    }
+    const res = await this.authedFetch("/api/me/onboarding/complete", {
+      method: "POST",
+    });
+    if (!res.ok) {
+      throw new Error(`complete onboarding failed: ${res.status}`);
+    }
+  }
+
   async getWorkspaces(): Promise<TestWorkspace[]> {
     const res = await this.authedFetch("/api/workspaces");
+    return res.json();
+  }
+
+  async getMe(): Promise<{ id: string; email: string; name: string }> {
+    const res = await this.authedFetch("/api/me");
+    if (!res.ok) {
+      throw new Error(`get me failed: ${res.status}`);
+    }
     return res.json();
   }
 

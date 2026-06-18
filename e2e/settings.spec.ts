@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { loginAsDefault, openWorkspaceMenu } from "./helpers";
+import { loginAsDefault } from "./helpers";
 
 test.describe("Settings", () => {
   test("updating workspace name reflects in sidebar immediately", async ({
@@ -7,36 +7,39 @@ test.describe("Settings", () => {
   }) => {
     await loginAsDefault(page);
 
-    // Read the current workspace name from the sidebar
-    const sidebarName = page.locator("aside button").first();
-    const originalName = await sidebarName.innerText();
-
-    // Navigate to settings
-    await openWorkspaceMenu(page);
-    await page.locator("text=Settings").click();
-    await page.waitForURL("**/settings");
-
-    // Change workspace name
-    const nameInput = page
-      .locator('input[type="text"]')
+    // The workspace switcher (first button in the sidebar header) shows the
+    // current name. Locate by slot, not name — the name changes mid-test.
+    const sidebarName = page
+      .locator('[data-slot="sidebar-header"] button')
       .first();
-    await nameInput.clear();
+    await expect(sidebarName).toContainText("E2E Workspace");
+
+    // Navigate to settings → workspace General tab.
+    await page.getByRole("link", { name: "Settings" }).click();
+    await page.waitForURL("**/settings**");
+    await page.getByRole("tab", { name: "General" }).click();
+
+    // Change workspace name. Capture the saved value for the restore step —
+    // the sidebar button's text also contains the avatar initial, so the
+    // input is the clean source of truth.
+    const nameInput = page.getByRole("textbox", { name: "Name" }).first();
+    await expect(nameInput).not.toHaveValue("");
+    const originalName = await nameInput.inputValue();
     const newName = "Renamed WS " + Date.now();
     await nameInput.fill(newName);
 
-    // Save
-    await page.locator("button", { hasText: "Save" }).click();
+    // Save and wait for the confirmation toast.
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("Workspace settings saved")).toBeVisible({
+      timeout: 5000,
+    });
 
-    // Wait for "Saved!" confirmation
-    await expect(page.locator("text=Saved!")).toBeVisible({ timeout: 5000 });
-
-    // Sidebar should reflect the new name WITHOUT page refresh
+    // Sidebar should reflect the new name WITHOUT page refresh.
     await expect(sidebarName).toContainText(newName);
 
-    // Restore original name so other tests aren't affected
-    await nameInput.clear();
-    await nameInput.fill(originalName.trim());
-    await page.locator("button", { hasText: "Save" }).click();
-    await expect(page.locator("text=Saved!")).toBeVisible({ timeout: 5000 });
+    // Restore original name so other tests aren't affected.
+    await nameInput.fill(originalName);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(sidebarName).toContainText(originalName);
   });
 });

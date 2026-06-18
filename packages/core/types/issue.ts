@@ -106,3 +106,37 @@ export interface QualityGateOverrideResponse {
     }[];
   };
 }
+
+export type IssueLoopBrakeState = "clear" | "active" | "cleared";
+
+export interface IssueLoopBrakeEvidence {
+  window_started_at?: string;
+  window_ended_at?: string;
+  run_count?: number;
+  total_input_tokens?: number;
+  total_output_tokens?: number;
+  total_cache_read_tokens?: number;
+  total_cache_write_tokens?: number;
+  total_tokens?: number;
+  estimated_cost_usd?: number;
+  missing_progress_signals?: string[];
+  existing_queued_tasks?: number;
+  existing_running_tasks?: number;
+}
+
+export interface IssueLoopBrake {
+  issue_id?: string;
+  workspace_id?: string;
+  project_id?: string | null;
+  state: IssueLoopBrakeState | string;
+  reason?: string;
+  evidence?: IssueLoopBrakeEvidence;
+  window_started_at?: string;
+  window_ended_at?: string;
+  triggered_at?: string;
+  triggered_by_task_id?: string | null;
+  cleared_at?: string | null;
+  cleared_by_type?: string;
+  cleared_by_id?: string | null;
+  clear_reason?: string;
+}

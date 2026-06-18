@@ -15,6 +15,7 @@ import type {
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
   IssueQualityGatesResponse,
+  IssueLoopBrake,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
   QualityGateOverrideResponse,
@@ -328,6 +329,42 @@ export const EMPTY_QUALITY_GATE_OVERRIDE_RESPONSE: QualityGateOverrideResponse =
     reason: "",
     skipped_gates: [],
   },
+};
+
+const IssueLoopBrakeEvidenceSchema = z.object({
+  window_started_at: z.string().optional(),
+  window_ended_at: z.string().optional(),
+  run_count: z.number().optional(),
+  total_input_tokens: z.number().optional(),
+  total_output_tokens: z.number().optional(),
+  total_cache_read_tokens: z.number().optional(),
+  total_cache_write_tokens: z.number().optional(),
+  total_tokens: z.number().optional(),
+  estimated_cost_usd: z.number().optional(),
+  missing_progress_signals: z.array(z.string()).optional(),
+  existing_queued_tasks: z.number().optional(),
+  existing_running_tasks: z.number().optional(),
+}).loose();
+
+export const IssueLoopBrakeSchema = z.object({
+  issue_id: z.string().optional(),
+  workspace_id: z.string().optional(),
+  project_id: z.string().nullable().optional(),
+  state: z.string().default("clear"),
+  reason: z.string().optional(),
+  evidence: IssueLoopBrakeEvidenceSchema.optional(),
+  window_started_at: z.string().optional(),
+  window_ended_at: z.string().optional(),
+  triggered_at: z.string().optional(),
+  triggered_by_task_id: z.string().nullable().optional(),
+  cleared_at: z.string().nullable().optional(),
+  cleared_by_type: z.string().optional(),
+  cleared_by_id: z.string().nullable().optional(),
+  clear_reason: z.string().optional(),
+}).loose();
+
+export const EMPTY_ISSUE_LOOP_BRAKE: IssueLoopBrake = {
+  state: "clear",
 };
 
 const SubscriberSchema = z.object({
